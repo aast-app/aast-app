@@ -1,0 +1,151 @@
+/* Custom Animated Select Component */
+.custom-select-container {
+  position: relative;
+  display: inline-block;
+  user-select: none;
+}
+
+.custom-select-trigger {
+  background-color: var(--border-03);
+  border: 1px solid var(--border-10);
+  color: var(--text-secondary);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+  min-height: 38px;
+
+  &:hover {
+    border-color: var(--border-20);
+    background-color: var(--border-05);
+  }
+
+  &.open {
+    border-color: #ff6b27;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+}
+
+.custom-select-text {
+  flex-grow: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 0.5rem;
+}
+
+.custom-select-chevron {
+  flex-shrink: 0;
+  transition: transform 0.3s ease;
+  color: var(--text-muted);
+
+  &.open {
+    transform: rotate(180deg);
+    color: #ff6b27;
+  }
+}
+
+.custom-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-10);
+  border-top: none;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  overflow: hidden;
+  z-index: 50;
+  
+  /* Pure CSS animation states */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-10px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
+  box-shadow: 0 10px 25px var(--shadow-50);
+
+  &.open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+}
+
+.custom-select-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  max-height: 250px;
+  overflow-y: auto;
+
+  /* Custom scrollbar for dropdown */
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--border-10);
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--border-20);
+  }
+}
+
+.custom-select-item {
+  padding: 0.5rem 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background-color: var(--border-05);
+    color: var(--text-primary);
+    padding-left: 1rem; /* subtle slide on hover */
+  }
+
+  &.selected {
+    color: #ff6b27;
+    font-weight: 600;
+    background-color: rgba(255, 107, 39, 0.1);
+  }
+}
+
+/* Modifier for pagination to look smaller */
+.custom-select-container.pagination-select-override {
+  .custom-select-trigger {
+    background-color: var(--shadow-20);
+    min-height: 32px;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    
+    &.open {
+      border-radius: 4px 4px 0 0;
+    }
+  }
+
+  .custom-select-dropdown {
+    border-radius: 0 0 4px 4px;
+  }
+  
+  .custom-select-item {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+    
+    &:hover {
+      padding-left: 0.8rem;
+    }
+  }
+}

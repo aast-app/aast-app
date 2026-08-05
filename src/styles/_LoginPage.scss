@@ -1,0 +1,55 @@
+/* === Login Page Styles === */
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 2.5rem;
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.login-title {
+  font-size: 2.5rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: var(--text-primary);
+  
+  span {
+    color: #df040a;
+  }
+}
+
+.login-subtitle {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-top: 0.5rem;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.login-input-group-last {
+  margin-bottom: 0.5rem;
+}
+
+.login-error-message {
+  background-color: rgba(223, 4, 10, 0.1);
+  border: 1px solid rgba(223, 4, 10, 0.3);
+  color: #ffb8b8;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}

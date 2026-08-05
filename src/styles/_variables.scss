@@ -1,0 +1,178 @@
+/* Auto-generated Theme Variables */
+:root {
+  /* Background Tokens */
+  --bg-main-dark: #141415;
+  --bg-main-light: #f8fafc;
+  --bg-main: var(--bg-main-dark);
+
+  --bg-panel-dark: #1a1a1a;
+  --bg-panel-light: #ffffff;
+  --bg-panel: var(--bg-panel-dark);
+
+  --bg-input-dark: #1e1e20;
+  --bg-input-light: #f1f5f9;
+  --bg-input: var(--bg-input-dark);
+
+  /* Typography Tokens */
+  --text-primary-dark: #ffffff;
+  --text-primary-light: #0f172a;
+  --text-primary: var(--text-primary-dark);
+
+  --text-secondary-dark: #e0e0e0;
+  --text-secondary-light: #334155;
+  --text-secondary: var(--text-secondary-dark);
+
+  --text-muted-dark: #a0a0a0;
+  --text-muted-light: #64748b;
+  --text-muted: var(--text-muted-dark);
+
+  --text-dim-dark: #888888;
+  --text-dim-light: #94a3b8;
+  --text-dim: var(--text-dim-dark);
+
+  --text-faint-dark: #666666;
+  --text-faint-light: #cbd5e1;
+  --text-faint: var(--text-faint-dark);
+
+  --text-disabled-dark: #555555;
+  --text-disabled-light: #e2e8f0;
+  --text-disabled: var(--text-disabled-dark);
+
+  /* Glass/Border Tokens (White in dark mode, Black in light mode) */
+  --border-01-dark: rgba(255, 255, 255, 0.01);
+  --border-01-light: rgba(0, 0, 0, 0.01);
+  --border-01: var(--border-01-dark);
+
+  --border-02-dark: rgba(255, 255, 255, 0.02);
+  --border-02-light: rgba(0, 0, 0, 0.02);
+  --border-02: var(--border-02-dark);
+
+  --border-03-dark: rgba(255, 255, 255, 0.03);
+  --border-03-light: rgba(0, 0, 0, 0.03);
+  --border-03: var(--border-03-dark);
+
+  --border-05-dark: rgba(255, 255, 255, 0.05);
+  --border-05-light: rgba(0, 0, 0, 0.05);
+  --border-05: var(--border-05-dark);
+
+  --border-10-dark: rgba(255, 255, 255, 0.1);
+  --border-10-light: rgba(0, 0, 0, 0.1);
+  --border-10: var(--border-10-dark);
+
+  --border-15-dark: rgba(255, 255, 255, 0.15);
+  --border-15-light: rgba(0, 0, 0, 0.15);
+  --border-15: var(--border-15-dark);
+
+  --border-20-dark: rgba(255, 255, 255, 0.2);
+  --border-20-light: rgba(0, 0, 0, 0.2);
+  --border-20: var(--border-20-dark);
+
+  --border-30-dark: rgba(255, 255, 255, 0.3);
+  --border-30-light: rgba(0, 0, 0, 0.3);
+  --border-30: var(--border-30-dark);
+
+  --border-50-dark: rgba(255, 255, 255, 0.5);
+  --border-50-light: rgba(0, 0, 0, 0.5);
+  --border-50: var(--border-50-dark);
+
+  /* Shadows */
+  --shadow-10-dark: rgba(0, 0, 0, 0.1);
+  --shadow-10-light: rgba(0, 0, 0, 0.05);
+  --shadow-10: var(--shadow-10-dark);
+
+  --shadow-20-dark: rgba(0, 0, 0, 0.2);
+  --shadow-20-light: rgba(0, 0, 0, 0.1);
+  --shadow-20: var(--shadow-20-dark);
+
+  --shadow-30-dark: rgba(0, 0, 0, 0.3);
+  --shadow-30-light: rgba(0, 0, 0, 0.15);
+  --shadow-30: var(--shadow-30-dark);
+
+  --shadow-50-dark: rgba(0, 0, 0, 0.5);
+  --shadow-50-light: rgba(0, 0, 0, 0.25);
+  --shadow-50: var(--shadow-50-dark);
+
+  --shadow-70-dark: rgba(0, 0, 0, 0.7);
+  --shadow-70-light: rgba(0, 0, 0, 0.35);
+  --shadow-70: var(--shadow-70-dark);
+
+  --overlay-dark-dark: rgba(20, 20, 21, 0.8);
+  --overlay-dark-light: rgba(248, 250, 252, 0.8);
+  --overlay-dark: var(--overlay-dark-dark);
+
+  /* Semantic Colors for Buttons */
+  --btn-success-text-dark: #4ade80;
+  --btn-success-bg-dark: rgba(74, 222, 128, 0.1);
+  --btn-success-border-dark: rgba(74, 222, 128, 0.3);
+
+  --btn-success-text-light: #16a34a;
+  --btn-success-bg-light: rgba(22, 163, 74, 0.15);
+  --btn-success-border-light: rgba(22, 163, 74, 0.4);
+
+  --btn-success-text: var(--btn-success-text-dark);
+  --btn-success-bg: var(--btn-success-bg-dark);
+  --btn-success-border: var(--btn-success-border-dark);
+
+  --btn-pending-text-dark: #ffb8b8;
+  --btn-pending-bg-dark: rgba(223, 4, 10, 0.1);
+  --btn-pending-border-dark: rgba(223, 4, 10, 0.3);
+
+  --btn-pending-text-light: #dc2626;
+  --btn-pending-bg-light: rgba(220, 38, 38, 0.15);
+  --btn-pending-border-light: rgba(220, 38, 38, 0.4);
+
+  --btn-pending-text: var(--btn-pending-text-dark);
+  --btn-pending-bg: var(--btn-pending-bg-dark);
+  --btn-pending-border: var(--btn-pending-border-dark);
+
+  --btn-update-text-dark: #ff8c5a;
+  --btn-update-bg-dark: rgba(255, 107, 39, 0.1);
+  --btn-update-border-dark: rgba(255, 107, 39, 0.3);
+
+  --btn-update-text-light: #ea580c;
+  --btn-update-bg-light: rgba(234, 88, 12, 0.15);
+  --btn-update-border-light: rgba(234, 88, 12, 0.4);
+
+  --btn-update-text: var(--btn-update-text-dark);
+  --btn-update-bg: var(--btn-update-bg-dark);
+  --btn-update-border: var(--btn-update-border-dark);
+}
+
+[data-theme='light'] {
+  --bg-main: var(--bg-main-light);
+  --bg-panel: var(--bg-panel-light);
+  --bg-input: var(--bg-input-light);
+  --text-primary: var(--text-primary-light);
+  --text-secondary: var(--text-secondary-light);
+  --text-muted: var(--text-muted-light);
+  --text-dim: var(--text-dim-light);
+  --text-faint: var(--text-faint-light);
+  --text-disabled: var(--text-disabled-light);
+  --border-01: var(--border-01-light);
+  --border-02: var(--border-02-light);
+  --border-03: var(--border-03-light);
+  --border-05: var(--border-05-light);
+  --border-10: var(--border-10-light);
+  --border-15: var(--border-15-light);
+  --border-20: var(--border-20-light);
+  --border-30: var(--border-30-light);
+  --border-50: var(--border-50-light);
+  --shadow-10: var(--shadow-10-light);
+  --shadow-20: var(--shadow-20-light);
+  --shadow-30: var(--shadow-30-light);
+  --shadow-50: var(--shadow-50-light);
+  --shadow-70: var(--shadow-70-light);
+  --overlay-dark: var(--overlay-dark-light);
+
+  --btn-success-text: var(--btn-success-text-light);
+  --btn-success-bg: var(--btn-success-bg-light);
+  --btn-success-border: var(--btn-success-border-light);
+
+  --btn-pending-text: var(--btn-pending-text-light);
+  --btn-pending-bg: var(--btn-pending-bg-light);
+  --btn-pending-border: var(--btn-pending-border-light);
+
+  --btn-update-text: var(--btn-update-text-light);
+  --btn-update-bg: var(--btn-update-bg-light);
+  --btn-update-border: var(--btn-update-border-light);
+}

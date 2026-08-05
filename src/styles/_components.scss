@@ -1,0 +1,181 @@
+/* === Global Reusable Components === */
+
+/* Gradient Buttons (Replaces .push-btn) */
+.gradient-btn {
+  background: linear-gradient(90deg, #df040a 0%, #ff6b27 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(223, 4, 10, 0.3);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  /* Smooth transition for standard properties */
+  transition: transform 0.3s ease, box-shadow 0.3s ease, filter 0.3s ease;
+
+  /* Premium Hover Border Element */
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 12px;
+    border: 2px solid #ff6b27;
+    opacity: 0;
+    transform: scale(0.95);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(223, 4, 10, 0.4);
+    filter: brightness(1.1);
+  }
+
+  &:hover::before {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+  
+  &.secondary {
+    background: var(--border-05);
+    color: var(--text-primary);
+    box-shadow: none;
+    border: 1px solid var(--border-10);
+    
+    &::before {
+      border-color: var(--border-50);
+    }
+
+    &:hover {
+      background: var(--border-10);
+    }
+  }
+
+  &.danger {
+    background: #df040a;
+    box-shadow: 0 4px 15px rgba(223, 4, 10, 0.3);
+
+    &::before {
+      border-color: #df040a;
+    }
+  }
+}
+
+/* Solid Danger Button (No Glass/Gradient) */
+.solid-danger-btn {
+  background: #cc0000;
+  color: white;
+  border: none;
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: #ff0000;
+    transform: translateY(-2px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+/* Modern Inputs (Replaces .brutal-input) */
+.modern-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.modern-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.modern-input, .modern-select {
+  width: 100%;
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-10);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  outline: none;
+
+  &:focus {
+    border-color: #ff6b27;
+    box-shadow: 0 0 0 2px rgba(255, 107, 39, 0.2);
+  }
+
+  &::placeholder {
+    color: var(--border-30);
+  }
+}
+
+/* Glassmorphic Cards */
+.glass-card {
+  background-color: var(--border-03);
+  border: 1px solid var(--border-05);
+  border-radius: 16px;
+  padding: 1.5rem;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px var(--shadow-10);
+}
+
+.glass-card-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  color: var(--text-primary);
+}
+
+/* General Typography Helpers */
+.text-accent {
+  color: #ff6b27;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+/* Global Premium Headers */
+.page-hero-title {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.5px;
+}
+
+.gradient-text {
+  color: transparent;
+  background: linear-gradient(90deg, #ff6b27, #df040a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: 0 0 20px rgba(255, 107, 39, 0.4);
+  display: inline-block;
+}
