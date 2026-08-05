@@ -1,16 +1,27 @@
-# React + Vite
+# IEC AAST App Data Manager
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A fast, standalone desktop application built to streamline data entry, cross-reference student IDs, and manage academic scores. Built with React, Node.js, and Electron.
 
-Currently, two official plugins are available:
+## 🚀 How to Use
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+This application is packaged as a single, portable executable. No complex installation or database configuration is required.
 
-## React Compiler
+1. Download the latest `.exe` file from the Releases section.
+2. Double-click the downloaded file.
+3. Set up your Master Data file on the first run.
+4. You're ready to go!
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## ✨ Features
 
-## Expanding the ESLint configuration
+* **Automated Data Processing:** Seamlessly cross-reference daily student IDs and exam scores against your Master Data file without manual Excel entry.
+* **Smart Master Sync:** Automatically injects processed scores and updates retake counters directly into your master tracking sheet.
+* **Daily Operations Dashboard:** A highly visual, calendar-based interface to track exactly which days have been processed, skipped, or are missing data.
+* **Comprehensive Audit Logs:** Built-in tracking system that logs every "ID Check", "Score Export", and daily override so you always have a historical record of system activity.
+* **Modern UI/UX:** A sleek, glassmorphic design featuring animated modals, color-coded status badges, and optimistic UI updates for a lightning-fast experience.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 🛠️ Built With
+
+* **[Electron](https://www.electronjs.org/)** - Desktop application framework
+* **[React](https://reactjs.org/)** - User interface & frontend state
+* **[Node.js](https://nodejs.org/) & [MongoDB](https://www.mongodb.com/)** - Local backend and persistent storage
+* **[Vite](https://vitejs.dev/)** - Lightning fast build tooling
