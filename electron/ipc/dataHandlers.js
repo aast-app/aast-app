@@ -4,7 +4,7 @@ import path, { basename } from 'node:path';
 import os from 'node:os';
 import * as XLSX from 'xlsx';
 import { getMainWindow } from '../window.js';
-import { Log, DailyOperation, FileLock } from '../db/models.js';
+import { Log, DailyOperation, FileLock, DailyMetaData } from '../db/models.js';
 
 // Module-level state replaces globals
 let baseDataMemory = null;
@@ -550,11 +550,36 @@ export function registerDataHandlers() {
       });
 
       if (payload.targetDate) {
+        // 1. Maintain the Calendar UI Flag
         await DailyOperation.findOneAndUpdate(
           { date: payload.targetDate },
           { idsUploaded: true },
           { upsert: true }
         );
+        
+        // 2. Track Analytics in DailyMetaData
+        const activityDate = new Date().toLocaleDateString('en-CA'); // Local YYYY-MM-DD
+        let meta = await DailyMetaData.findOne({ activityDate });
+        if (!meta) {
+          meta = new DailyMetaData({ activityDate });
+        }
+        
+        let record = meta.ceptData.find(r => r.intendedTestDate === payload.targetDate);
+        if (!record) {
+          meta.ceptData.push({ intendedTestDate: payload.targetDate, maxIdFiles: 0, maxScoreFiles: 0, contributors: [] });
+          record = meta.ceptData[meta.ceptData.length - 1]; // Re-bind to the actual Mongoose subdocument
+        }
+        
+        if (successCount > record.maxIdFiles) {
+          record.maxIdFiles = successCount;
+        }
+        
+        // Use a simple Set-like logic for the contributors array so it's clean
+        if (!record.contributors.includes(username)) {
+          record.contributors.push(username);
+        }
+        meta.markModified('ceptData');
+        await meta.save();
       }
 
       return { success: true, message: `Successfully saved ${successCount} file(s) to folder\nThe base data file got successfully updated as well` };
@@ -845,11 +870,36 @@ export function registerDataHandlers() {
       });
 
       if (payload.targetDate) {
+        // 1. Maintain the Calendar UI Flag
         await DailyOperation.findOneAndUpdate(
           { date: payload.targetDate },
           { scoresUploaded: true },
           { upsert: true }
         );
+        
+        // 2. Track Analytics in DailyMetaData
+        const activityDate = new Date().toLocaleDateString('en-CA');
+        let meta = await DailyMetaData.findOne({ activityDate });
+        if (!meta) {
+          meta = new DailyMetaData({ activityDate });
+        }
+        
+        let record = meta.ceptData.find(r => r.intendedTestDate === payload.targetDate);
+        if (!record) {
+          meta.ceptData.push({ intendedTestDate: payload.targetDate, maxIdFiles: 0, maxScoreFiles: 0, contributors: [] });
+          record = meta.ceptData[meta.ceptData.length - 1]; // Re-bind to the actual Mongoose subdocument
+        }
+        
+        // For scores, max is 1 since they upload the master file
+        if (1 > record.maxScoreFiles) {
+          record.maxScoreFiles = 1;
+        }
+        
+        if (!record.contributors.includes(username)) {
+          record.contributors.push(username);
+        }
+        meta.markModified('ceptData');
+        await meta.save();
       }
 
       return { success: true, message: `Successfully saved clean scores to ${basename(filePath)}` };

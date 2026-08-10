@@ -2,8 +2,9 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ThemeToggle from './ThemeToggle';
+import VersionBadge from './VersionBadge';
 
-function Sidebar() {
+function Sidebar({ versionInfo, openUpdateModal }) {
   const { user, logout } = useAuth();
   const username = user?.username || 'Guest User';
   const role = user?.role || 'user';
@@ -40,6 +41,10 @@ function Sidebar() {
             </NavLink>
           </>
         )}
+        
+        <div style={{ marginTop: 'auto', paddingLeft: '0.25rem' }}>
+          <VersionBadge versionInfo={versionInfo} openUpdateModal={openUpdateModal} className="sidebar-version-badge" />
+        </div>
       </nav>
 
       <div className="sidebar-footer">

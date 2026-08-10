@@ -4,7 +4,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { execFile } from 'child_process';
 import { getMainWindow } from '../window.js';
-import { Log } from '../db/models.js';
+import { Log, DailyMetaData } from '../db/models.js';
 import os from 'os';
 import { BrowserWindow } from 'electron';
 
@@ -398,6 +398,16 @@ objExcel.Quit
           unmatchedRegNums: unmatched
         }
       });
+
+      // 7. Track Analytics in DailyMetaData
+      const activityDate = new Date().toLocaleDateString('en-CA');
+      let meta = await DailyMetaData.findOne({ activityDate });
+      if (!meta) {
+        meta = new DailyMetaData({ activityDate });
+      }
+      meta.ceptCreate.tablesGenerated += Object.keys(locationGroups).length;
+      meta.ceptCreate.contributors.push(username);
+      await meta.save();
 
       return { 
         success: true, 

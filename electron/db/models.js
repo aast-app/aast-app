@@ -79,6 +79,32 @@ const dailyOperationSchema = new mongoose.Schema({
 
 export const DailyOperation = mongoose.model('DailyOperation', dailyOperationSchema);
 
+const ceptDataRecordSchema = new mongoose.Schema({
+  intendedTestDate: { type: String, required: true },
+  maxIdFiles: { type: Number, default: 0 },
+  maxScoreFiles: { type: Number, default: 0 },
+  contributors: { type: [String], default: [] }
+}, { _id: false });
+
+const dailyMetaDataSchema = new mongoose.Schema({
+  activityDate: { type: String, required: true, unique: true }, // YYYY-MM-DD
+  ceptData: { type: [ceptDataRecordSchema], default: [] },
+  ceptCreate: {
+    tablesGenerated: { type: Number, default: 0 },
+    loginPdfsGenerated: { type: Number, default: 0 },
+    contributors: { type: [String], default: [] }
+  }
+});
+
+export const DailyMetaData = mongoose.model('DailyMetaData', dailyMetaDataSchema);
+
+const appSettingsSchema = new mongoose.Schema({
+  latestAppVersion: { type: String, default: '0.1.0' },
+  downloadUrl: { type: String, default: 'https://github.com/aast-app/aast-app/releases/download/v0.1.0/IEC.AAST.App.Setup.0.1.0.exe' }
+});
+
+export const AppSettings = mongoose.model('AppSettings', appSettingsSchema);
+
 const fileLockSchema = new mongoose.Schema({
   lockId: {
     type: String,

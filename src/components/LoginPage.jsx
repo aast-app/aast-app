@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import Loader from './Loader';
-export default function LoginPage() {
+import VersionBadge from './VersionBadge';
+
+export default function LoginPage({ versionInfo, openUpdateModal }) {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -99,6 +101,7 @@ export default function LoginPage() {
           
         </form>
       </motion.div>
+      <VersionBadge versionInfo={versionInfo} openUpdateModal={openUpdateModal} className="fixed-bottom-right" />
     </div>
   );
 }

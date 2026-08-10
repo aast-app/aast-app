@@ -3,13 +3,13 @@ import { useLocation, useOutlet } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './Sidebar';
 
-function Layout() {
+function Layout({ versionInfo, openUpdateModal }) {
   const location = useLocation();
   const element = useOutlet(); // Use the frozen outlet element to prevent double-flashes during exit animations
 
   return (
     <div className="steam-layout-container">
-      <Sidebar />
+      <Sidebar versionInfo={versionInfo} openUpdateModal={openUpdateModal} />
       
       <div className="steam-main-canvas">
         <AnimatePresence mode="wait">

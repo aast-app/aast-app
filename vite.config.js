@@ -12,6 +12,13 @@ export default defineConfig({
     electron([
       {
         entry: 'electron/main.js',
+        vite: {
+          build: {
+            rollupOptions: {
+              external: ['playwright', 'playwright-core']
+            }
+          }
+        }
       }
     ]),
     renderer()

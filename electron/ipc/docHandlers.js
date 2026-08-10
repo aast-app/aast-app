@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import * as XLSX from 'xlsx';
 import { getMainWindow } from '../window.js';
-import { Log } from '../db/models.js';
+import { Log, DailyMetaData } from '../db/models.js';
 import os from 'os';
 
 function generatePdfHtml(students, logoBase64) {
@@ -460,6 +460,16 @@ export function registerDocHandlers() {
           exportFolder: exportDir
         }
       });
+
+      // Track Analytics in DailyMetaData
+      const activityDate = new Date().toLocaleDateString('en-CA');
+      let meta = await DailyMetaData.findOne({ activityDate });
+      if (!meta) {
+        meta = new DailyMetaData({ activityDate });
+      }
+      meta.ceptCreate.loginPdfsGenerated += successCount;
+      meta.ceptCreate.contributors.push(username);
+      await meta.save();
 
       return { success: true, pdfPath: exportDir };
 

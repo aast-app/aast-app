@@ -1,6 +1,6 @@
 import { ipcMain, dialog, app } from 'electron';
 import bcrypt from 'bcryptjs';
-import { User, Log, DailyOperation } from '../db/models.js';
+import { User, Log, DailyOperation, DailyMetaData } from '../db/models.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -310,30 +310,141 @@ export function registerAdminHandlers() {
   });
 
   // 7. Get Dashboard Stats
-  ipcMain.handle('get-dashboard-stats', async () => {
+  ipcMain.handle('get-dashboard-stats', async (event, targetMonth) => {
     try {
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0,0,0,0);
+      let datePrefix = targetMonth;
+      if (!datePrefix) {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        datePrefix = `${year}-${month}`; // e.g., '2026-08'
+      }
 
-      const logs = await Log.find({
-        action: { $in: ['ID Export', 'Scores Export'] },
-        timestamp: { $gte: startOfMonth }
+      const metaDocs = await DailyMetaData.find({
+        activityDate: { $regex: `^${datePrefix}` }
       });
 
-      let filesProcessed = 0;
-      logs.forEach(log => {
-        if (log.action === 'ID Export' && log.metadata && log.metadata.fileCount) {
-          filesProcessed += log.metadata.fileCount;
-        } else if (log.action === 'Scores Export') {
-          filesProcessed += 1;
+      let monthlyIdFiles = 0;
+      let monthlyScoreFiles = 0;
+      let monthlyTablesGenerated = 0;
+      let monthlyPdfsGenerated = 0;
+
+      metaDocs.forEach(meta => {
+        if (meta.ceptCreate) {
+          monthlyTablesGenerated += meta.ceptCreate.tablesGenerated || 0;
+          monthlyPdfsGenerated += meta.ceptCreate.loginPdfsGenerated || 0;
+        }
+        if (meta.ceptData && meta.ceptData.length > 0) {
+          meta.ceptData.forEach(record => {
+            monthlyIdFiles += record.maxIdFiles || 0;
+            monthlyScoreFiles += record.maxScoreFiles || 0;
+          });
         }
       });
 
-      return { success: true, filesProcessed };
+      return { success: true, monthlyIdFiles, monthlyScoreFiles, monthlyTablesGenerated, monthlyPdfsGenerated };
     } catch (error) {
       console.error("Dashboard Stats Error:", error);
-      return { success: false, filesProcessed: 0 };
+      return { success: false, monthlyIdFiles: 0, monthlyScoreFiles: 0 };
+    }
+  });
+
+  // 7.5 Get Detailed Dashboard Stats (Table)
+  ipcMain.handle('get-dashboard-details', async (event, { filterMonth, filterDay, filterUser } = {}) => {
+    try {
+      const matchStage = {};
+      if (filterDay && filterDay !== '') {
+        // filterDay is a full date from the picker like "2026-08-09"
+        matchStage.activityDate = filterDay;
+      } else if (filterMonth && filterMonth !== 'All Months') {
+        // filterMonth is like "2026-08"
+        matchStage.activityDate = { $regex: `^${filterMonth}` };
+      }
+
+      const metaDocs = await DailyMetaData.find(matchStage).sort({ activityDate: -1 });
+      
+      let detailedData = metaDocs.map(meta => {
+        let dailyIds = 0;
+        let dailyScores = 0;
+        let dailyTables = meta.ceptCreate?.tablesGenerated || 0;
+        let dailyPdfs = meta.ceptCreate?.loginPdfsGenerated || 0;
+        let contributorsSet = new Set();
+
+        // Tally from ceptData
+        if (meta.ceptData && meta.ceptData.length > 0) {
+          meta.ceptData.forEach(record => {
+            dailyIds += record.maxIdFiles || 0;
+            dailyScores += record.maxScoreFiles || 0;
+            if (record.contributors && record.contributors.length > 0) {
+              record.contributors.forEach(c => contributorsSet.add(c));
+            }
+          });
+        }
+
+        // Tally from ceptCreate
+        if (meta.ceptCreate && meta.ceptCreate.contributors) {
+          meta.ceptCreate.contributors.forEach(c => contributorsSet.add(c));
+        }
+
+        return {
+          date: meta.activityDate,
+          ids: dailyIds,
+          scores: dailyScores,
+          tables: dailyTables,
+          pdfs: dailyPdfs,
+          contributors: Array.from(contributorsSet)
+        };
+      });
+
+      // Apply user filter after aggregation
+      if (filterUser && filterUser !== 'All Users') {
+        detailedData = detailedData.filter(day => day.contributors.includes(filterUser));
+      }
+
+      return { success: true, details: detailedData };
+    } catch (error) {
+      console.error("Dashboard Details Error:", error);
+      return { success: false, details: [] };
+    }
+  });
+
+  // 7.6 Get Dashboard Filters
+  ipcMain.handle('get-dashboard-filters', async () => {
+    try {
+      const metaDocs = await DailyMetaData.find({}, 'activityDate ceptData.contributors ceptCreate.contributors');
+      
+      const monthsSet = new Set();
+      const daysSet = new Set();
+      const usersSet = new Set();
+
+      metaDocs.forEach(meta => {
+        if (meta.activityDate) {
+          const parts = meta.activityDate.split('-');
+          if (parts.length === 3) {
+            monthsSet.add(`${parts[0]}-${parts[1]}`); // YYYY-MM
+            daysSet.add(parts[2]); // DD
+          }
+        }
+
+        if (meta.ceptData) {
+          meta.ceptData.forEach(record => {
+            if (record.contributors) record.contributors.forEach(c => usersSet.add(c));
+          });
+        }
+        if (meta.ceptCreate && meta.ceptCreate.contributors) {
+          meta.ceptCreate.contributors.forEach(c => usersSet.add(c));
+        }
+      });
+
+      // Sort sets
+      const months = Array.from(monthsSet).sort().reverse();
+      const days = Array.from(daysSet).sort();
+      const users = Array.from(usersSet).sort();
+
+      return { success: true, months, days, users };
+    } catch (error) {
+      console.error("Dashboard Filters Error:", error);
+      return { success: false, months: [], days: [], users: [] };
     }
   });
 

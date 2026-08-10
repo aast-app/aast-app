@@ -4,6 +4,7 @@ import { registerAdminHandlers } from './adminHandlers.js';
 import { registerLockHandlers } from './lockHandlers.js';
 import { registerCeptCreateHandlers } from './ceptCreateHandlers.js';
 import { registerDocHandlers } from './docHandlers.js';
+import { registerPlaywrightHandlers } from './playwrightHandlers.js';
 
 export function registerIpcHandlers() {
   registerAuthHandlers();
@@ -12,4 +13,5 @@ export function registerIpcHandlers() {
   registerLockHandlers();
   registerCeptCreateHandlers();
   registerDocHandlers();
+  registerPlaywrightHandlers();
 }
