@@ -3,45 +3,23 @@
   "private": true,
   "version": "0.1.1",
   "type": "module",
-  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "dist": "vite build && electron-builder",
-    "lint": "eslint .",
-    "preview": "vite preview"
-  },
-  "build": {
-    "appId": "com.aastapp.app",
-    "productName": "IEC AAST App",
-    "directories": {
-      "output": "release"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "public/logo2.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "public/logo2.ico",
-      "uninstallerIcon": "public/logo2.ico"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*"
-    ]
+    "lint": "eslint src server/src server/test scripts/dev.mjs vite.config.js",
+    "preview": "vite preview",
+    "dev:all": "node scripts/dev.mjs",
+    "build:vercel": "npm exec --prefix server -- prisma generate --schema server/prisma/postgresql.prisma && npm exec --prefix server -- prisma migrate deploy --schema server/prisma/postgresql.prisma && npm run build"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.2",
-    "bcryptjs": "^3.0.3",
-    "dotenv": "^17.4.2",
+    "axios": "^1.19.0",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.42.2",
-    "mongoose": "^9.7.4",
-    "playwright": "^1.62.1",
+    "html2canvas": "^1.4.1",
+    "html2pdf.js": "^0.14.0",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
@@ -53,15 +31,14 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
-    "electron": "^43.1.0",
-    "electron-builder": "^26.15.3",
     "eslint": "^10.6.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.7.0",
     "sass": "^1.101.0",
-    "vite": "^8.1.1",
-    "vite-plugin-electron": "^1.1.0",
-    "vite-plugin-electron-renderer": "^1.0.0"
+    "vite": "^8.1.1"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
+import { useAuth } from '../context/useAuth.js';
 import CustomSelect from './CustomSelect';
-const { ipcRenderer } = window.require('electron');
+import api from '../api';
+import { Icon } from './WorkspaceUI';
 
 function HomePage() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const [monthlyIdFiles, setMonthlyIdFiles] = useState(0);
   const [monthlyScoreFiles, setMonthlyScoreFiles] = useState(0);
@@ -13,6 +13,12 @@ function HomePage() {
   const [monthlyPdfs, setMonthlyPdfs] = useState(0);
   const [detailedStats, setDetailedStats] = useState([]);
   const [isBotRunning, setIsBotRunning] = useState(false);
+  const [botResults, setBotResults] = useState(null);
+  const [botError, setBotError] = useState(null);
+  const [showBotSetup, setShowBotSetup] = useState(false);
+  const [botSingleNumber, setBotSingleNumber] = useState('');
+  const [botBatchNumbers, setBotBatchNumbers] = useState(null);
+  const fileInputRef = useRef(null);
 
   const [availableFilters, setAvailableFilters] = useState({ months: [], days: [], users: [] });
   const [filterMonth, setFilterMonth] = useState('All Months');
@@ -40,7 +46,7 @@ function HomePage() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res = await ipcRenderer.invoke('get-dashboard-stats', statsMonth);
+        const res = (await api.post('/get-dashboard-stats', { targetMonth: statsMonth })).data;
         if (res.success) {
           setMonthlyIdFiles(res.monthlyIdFiles);
           setMonthlyScoreFiles(res.monthlyScoreFiles);
@@ -57,7 +63,7 @@ function HomePage() {
   useEffect(() => {
     const fetchFilters = async () => {
       try {
-        const res = await ipcRenderer.invoke('get-dashboard-filters');
+        const res = (await api.post('/get-dashboard-filters')).data;
         if (res.success) {
           setAvailableFilters({
             months: res.months,
@@ -75,7 +81,7 @@ function HomePage() {
   useEffect(() => {
     const fetchDetails = async () => {
       try {
-        const detailsRes = await ipcRenderer.invoke('get-dashboard-details', { filterMonth, filterDay, filterUser });
+        const detailsRes = (await api.post('/get-dashboard-details', { filterMonth, filterDay, filterUser })).data;
         if (detailsRes.success) {
           setDetailedStats(detailsRes.details);
         }
@@ -86,16 +92,44 @@ function HomePage() {
     if (user?.role === 'admin') fetchDetails();
   }, [user, filterMonth, filterDay, filterUser]);
 
-  const runPlaywrightTest = async () => {
+  
+  const handleBotFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      
+      const numbers = [];
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] && data[i][0]) {
+          numbers.push(String(data[i][0]).trim());
+        }
+      }
+      setBotBatchNumbers(numbers);
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const runPlaywrightTest = async (numbersToProcess) => {
     if (isBotRunning) return;
     setIsBotRunning(true);
     try {
-      const response = await ipcRenderer.invoke('test-automation');
-      if (!response.success) {
-        console.error("Bot failed:", response.message);
-      }
+      setShowBotSetup(false);
+      const response = (await api.post('/test-automation', { numbers: numbersToProcess })).data;
+        if (response.success) {
+          setBotResults({ failed: response.failedNumbers || [], success: response.successfulNumbers || [] });
+          setBotError(null);
+        } else {
+          setBotError(response.message);
+          setBotResults({ failed: response.failedNumbers || [], success: response.successfulNumbers || [] });
+        }
     } catch (err) {
-      console.error("IPC Error:", err);
+      setBotError(err.response?.data?.message || err.message || 'Unable to start enrollment.');
     } finally {
       setIsBotRunning(false);
     }
@@ -103,33 +137,25 @@ function HomePage() {
 
   return (
     <div className="home-page-wrapper">
+      <section className="workspace-hero">
+        <div><span className="eyebrow">YOUR DAY, IN FOCUS</span><h1>Welcome back,<br/><span>{user?.username || 'User'}.</span></h1><p>Everything you need for a smoother CEPT day.</p></div>
+        <div className="hero-art" aria-hidden="true"><div className="hero-orbit"/><div className="hero-mini-card"><Icon name="document"/><span>CEPT</span><b>Ready. Set. Go.</b><i/><i/><i/></div><span className="hero-stamp">✓</span></div>
+      </section>
       {/* Welcome Section */}
       <div className="home-welcome-section">
         <div className="home-welcome-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-          <h1 className="home-welcome-title">
-            Welcome back, <span className="highlight-username">{user?.username || 'User'}</span>
-          </h1>
+          <span className="eyebrow">WORKSPACE ACTIVITY</span>
           {user?.role === 'admin' && (
             <button 
               className={`playwright-test-btn ${isBotRunning ? 'running' : ''}`}
-              onClick={runPlaywrightTest}
+              onClick={() => setShowBotSetup(true)}
               disabled={isBotRunning}
             >
-              {isBotRunning ? 'Bot Running...' : 'Test Playwright Bot'}
+              {isBotRunning ? 'Automation running…' : 'Bot test'}
             </button>
           )}
         </div>
-        {user?.role === 'user' && (
-          <>
-            <p className="home-subtitle text-muted">Select an operation to get started.</p>
-            
-            <div className="home-actions">
-              <button className="gradient-btn" onClick={() => navigate('/cept-data')}>
-                Manage CEPT Data
-              </button>
-            </div>
-          </>
-        )}
+
         
         {user?.role === 'admin' && (
           <div className="admin-stats-wrapper">
@@ -319,7 +345,7 @@ function HomePage() {
       )}
 
       {/* Stats Cards Section (Users Only) */}
-      {user?.role === 'user' && (
+      {user?.role !== 'admin' && (
         <div className="home-stats-section">
         <h2 className="home-stats-title">System Overview</h2>
         
@@ -364,8 +390,141 @@ function HomePage() {
         </div>
       </div>
       )}
+
+      
+      {showBotSetup && (
+        <div className="cept-modal-overlay" onClick={() => setShowBotSetup(false)}>
+          <div className="cept-modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="flex justify-between items-center cept-modal-header">
+              <h2 className="text-white page-hero-title cept-modal-title">
+                Bot <span className="gradient-text">Configuration</span>
+              </h2>
+              <button className="cept-modal-close" onClick={() => setShowBotSetup(false)}>&times;</button>
+            </div>
+            
+            {!botBatchNumbers ? (
+              <div className="cept-modal-body">
+                <p style={{ color: 'white', marginBottom: '1rem' }}>Enter a single registration number:</p>
+                <input 
+                  type="text" 
+                  className="cept-input"
+                  style={{ width: '100%', marginBottom: '1rem' }}
+                  placeholder="e.g. 241010570"
+                  value={botSingleNumber}
+                  onChange={(e) => setBotSingleNumber(e.target.value)}
+                />
+                <button 
+                  className="gradient-btn" 
+                  style={{ width: '100%', marginBottom: '1.5rem' }}
+                  onClick={() => runPlaywrightTest([botSingleNumber])}
+                  disabled={!botSingleNumber}
+                >
+                  Run Single Student
+                </button>
+                
+                <div style={{ textAlign: 'center', color: '#888', marginBottom: '1.5rem' }}>— OR —</div>
+                
+                <p style={{ color: 'white', marginBottom: '1rem' }}>Upload Excel Sheet (Column A):</p>
+                <input 
+                  type="file" 
+                  accept=".xlsx, .xls, .csv"
+                  style={{ display: 'none' }}
+                  ref={fileInputRef}
+                  onChange={handleBotFileUpload}
+                />
+                <button 
+                  className="btn-glass" 
+                  style={{ width: '100%', padding: '1rem' }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', marginRight: '8px', verticalAlign: 'middle' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  Browse Excel File
+                </button>
+              </div>
+            ) : (
+              <div className="cept-modal-body text-center">
+                <h3 style={{ color: '#10b981', fontSize: '2rem', marginBottom: '1rem' }}>{botBatchNumbers.length}</h3>
+                <p style={{ color: 'white', marginBottom: '2rem' }}>Students found in the uploaded file.</p>
+                
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button 
+                    className="btn-glass" 
+                    style={{ flex: 1 }}
+                    onClick={() => setBotBatchNumbers(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="gradient-btn" 
+                    style={{ flex: 1 }}
+                    onClick={() => runPlaywrightTest(botBatchNumbers)}
+                  >
+                    Proceed
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {(botResults !== null || botError !== null) && (
+        <div className="cept-modal-overlay" onClick={() => { setBotResults(null); setBotError(null); }}>
+          <div className="cept-modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="flex justify-between items-center cept-modal-header">
+              <h2 className="text-white page-hero-title cept-modal-title">
+                Automation <span className="gradient-text">Complete</span>
+              </h2>
+              <button className="cept-modal-close" onClick={() => { setBotResults(null); setBotError(null); }}>&times;</button>
+            </div>
+            <div className="cept-modal-body">
+              <h3 style={{ color: 'white', marginBottom: '1rem' }}>Processing Report</h3>
+              
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                <div style={{ flex: 1, padding: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ color: '#10b981', fontSize: '1.5rem', fontWeight: 'bold' }}>{botResults ? botResults.success.length : 0}</div>
+                  <div style={{ color: '#a7f3d0', fontSize: '0.85rem' }}>Successful</div>
+                </div>
+                <div style={{ flex: 1, padding: '0.75rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ color: '#ef4444', fontSize: '1.5rem', fontWeight: 'bold' }}>{botResults ? botResults.failed.length : 0}</div>
+                  <div style={{ color: '#fecaca', fontSize: '0.85rem' }}>Failed</div>
+                </div>
+              </div>
+
+              {botError && (
+                <div style={{ color: '#ef4444', padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', marginBottom: '1rem' }}>
+                  <p style={{ fontWeight: 'bold' }}>Automation Error or Interrupted:</p>
+                  <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>{botError.includes('browser has been closed') ? 'You manually closed the browser before the task finished.' : botError}</p>
+                </div>
+              )}
+
+              {botResults && (botResults.success.length > 0 || botResults.failed.length > 0) && (
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '8px', maxHeight: '250px', overflowY: 'auto' }}>
+                  <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
+                    {botResults.success.map(num => (
+                      <li key={'s-'+num} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <span style={{ color: '#e5e7eb' }}>{num}</span>
+                        <span style={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 'bold' }}>✓ SUCCESS</span>
+                      </li>
+                    ))}
+                    {botResults.failed.map(num => (
+                      <li key={'f-'+num} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <span style={{ color: '#e5e7eb' }}>{num}</span>
+                        <span style={{ color: '#ef4444', fontSize: '0.85rem', fontWeight: 'bold' }}>✕ FAILED (Not Found)</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <button className="gradient-btn" onClick={() => { setBotResults(null); setBotError(null); }} style={{ marginTop: '1.5rem', width: '100%' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
 export default HomePage;

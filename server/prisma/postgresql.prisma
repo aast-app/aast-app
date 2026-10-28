@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+  output = "../src/generated/postgresql"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String?
+  role      String   @default("user")
+  email     String?
+  avatarUrl String?
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Log {
+  id        Int      @id @default(autoincrement())
+  username  String
+  action    String
+  details   String   @default("")
+  metadata  String   @default("{}") // Storing JSON as string
+  timestamp DateTime @default(now())
+}
+
+model DailyOperation {
+  id              Int     @id @default(autoincrement())
+  date            String  @unique
+  idsUploaded     Boolean @default(false)
+  scoresUploaded  Boolean @default(false)
+  idsNotNeeded    Boolean @default(false)
+  scoresNotNeeded Boolean @default(false)
+}
+
+model DailyMetaData {
+  id           Int    @id @default(autoincrement())
+  activityDate String @unique
+  ceptData     String @default("[]") // Storing JSON as string
+  ceptCreate   String @default("{\"tablesGenerated\":0,\"loginPdfsGenerated\":0,\"contributors\":[]}") // Storing JSON as string
+}
+
+model Student {
+  id                 Int      @id @default(autoincrement())
+  registrationNumber String   @unique
+  lastName           String
+  firstName          String
+  name               String   @default("")
+  nameVerified       Boolean  @default(false)
+  email              String   @default("")
+  mobile             String   @default("")
+  examDate           String   @default("")
+  examTime           String   @default("")
+  registrationData   String   @default("{}")
+  score              Float?
+  value              String?
+  idsNotNeeded       Boolean  @default(false)
+  scoresNotNeeded    Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model UploadHistory {
+  id              Int      @id @default(autoincrement())
+  username        String
+  action          String
+  fileName        String
+  recordsUpdated  Int      @default(0)
+  timestamp       DateTime @default(now())
+}
+
+model RegistrationBatch {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique
+  date         String
+  sequence     Int
+  testDate     String
+  createdBy    String
+  createdAt    DateTime @default(now())
+  studentCount Int
+  fileCount    Int
+  files        String
+
+  @@unique([date, sequence])
+}
+
+model RuntimeState {
+  key String @id
+  namespace String
+  payload String
+  expiresAt DateTime
+  @@index([namespace, expiresAt])
+}
+model ServerBackup {
+  fileName String @id
+  payload String
+  bytes Int
+  safety Boolean @default(false)
+  createdAt DateTime @default(now())
+}

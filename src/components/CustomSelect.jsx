@@ -1,57 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
-
-const CustomSelect = ({ options, value, onChange, className = '', minWidth = '140px' }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef(null);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleSelect = (optionValue) => {
-    onChange({ target: { value: optionValue } }); 
-    setIsOpen(false);
-  };
-
-  const selectedOption = options.find(opt => opt.value === value) || { label: value, value };
-
-  return (
-    <div className={`custom-select-container ${className}`} ref={containerRef} style={{ minWidth }}>
-      <div 
-        className={`custom-select-trigger ${isOpen ? 'open' : ''}`}
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        <span className="custom-select-text">{selectedOption.label}</span>
-        <svg 
-          className={`custom-select-chevron ${isOpen ? 'open' : ''}`} 
-          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        >
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
-      </div>
-
-      <div className={`custom-select-dropdown ${isOpen ? 'open' : ''}`}>
-        <ul className="custom-select-list">
-          {options.map((opt) => (
-            <li 
-              key={opt.value}
-              className={`custom-select-item ${opt.value === value ? 'selected' : ''}`}
-              onClick={() => handleSelect(opt.value)}
-            >
-              {opt.label}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-};
-
-export default CustomSelect;
+import React, { useState, useRef, useId, useLayoutEffect, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+const textOf = x => React.isValidElement(x) ? textOf(x.props.children) : Array.isArray(x) ? x.map(textOf).join('') : String(x ?? '');
+export default function CustomSelect({options,value,onChange,className='',minWidth='140px',label,disabled=false}) {
+ const [open,setOpen]=useState(false),[active,setActive]=useState(0),[position,setPosition]=useState({});
+ const trigger=useRef(null),menu=useRef(null),id=useId(),search=useRef({text:'',time:0});
+ const selected=options.findIndex(o=>String(o.value)===String(value));
+ const choose=i=>{if(!options[i] || options[i].disabled)return;onChange({target:{value:options[i].value}});setOpen(false);trigger.current?.focus();};
+ const show=()=>{setActive(Math.max(0,selected));setOpen(true);};
+ useLayoutEffect(()=>{if(!open)return;const place=()=>{const r=trigger.current.getBoundingClientRect(),height=Math.min(280,options.length*40+12),below=innerHeight-r.bottom-12,above=r.top-12,up=below<height&&above>below;setPosition({position:'fixed',left:Math.max(8,Math.min(r.left,innerWidth-Math.max(r.width,170)-8)),width:Math.min(Math.max(r.width,170),innerWidth-16),maxHeight:Math.max(80,Math.min(height,up?above:below)),...(up?{bottom:innerHeight-r.top+6}:{top:r.bottom+6})});};place();menu.current?.focus();const close=e=>{if(!trigger.current?.contains(e.target)&&!menu.current?.contains(e.target))setOpen(false);};const scroll=e=>{if(!menu.current?.contains(e.target))place();};document.addEventListener('pointerdown',close);window.addEventListener('resize',place);window.addEventListener('scroll',scroll,true);return()=>{document.removeEventListener('pointerdown',close);window.removeEventListener('resize',place);window.removeEventListener('scroll',scroll,true);};},[open,options.length]);
+ useEffect(()=>{if(open)document.getElementById(id+'-'+active)?.scrollIntoView({block:'nearest'});},[open,active,id]);
+ const key=e=>{if(e.key==='Escape'){e.preventDefault();setOpen(false);trigger.current?.focus();}else if(e.key==='Tab'){setOpen(false);trigger.current?.focus();}else if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();if(!open){show();return;}setActive(i=>e.key==='Home'?0:e.key==='End'?options.length-1:(i+(e.key==='ArrowDown'?1:-1)+options.length)%options.length);}else if(e.key==='Enter'||e.key===' '){e.preventDefault();open?choose(active):show();}else if(e.key.length===1){const now=Date.now();search.current={text:(now-search.current.time>600?'':search.current.text)+e.key.toLowerCase(),time:now};const i=options.findIndex(o=>textOf(o.label).toLowerCase().startsWith(search.current.text));if(i>=0){setActive(i);if(!open)setOpen(true);}}};
+ return <div className={'themed-select '+className} style={{minWidth}}><button type="button" ref={trigger} disabled={disabled} className="themed-select-trigger" role="combobox" aria-label={label||textOf(options[0]?.label)||'Filter'} aria-expanded={open} aria-controls={open?id:undefined} aria-haspopup="listbox" onKeyDown={key} onClick={()=>open?setOpen(false):show()}><span>{options[selected]?.label??value}</span><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 7 5 5 5-5" stroke="currentColor" strokeWidth="1.7"/></svg></button>{open&&createPortal(<div id={id} ref={menu} className="themed-select-menu" style={position} role="listbox" aria-label={label||'Options'} tabIndex={-1} aria-activedescendant={id+'-'+active} onKeyDown={key}>{options.map((o,i)=><div key={o.value} id={id+'-'+i} role="option" aria-selected={i===selected} aria-disabled={o.disabled||undefined} className={'themed-select-option '+(i===active?'focused':'')} onPointerMove={()=>setActive(i)} onClick={()=>choose(i)}><span>{o.label}</span>{i===selected&&<b aria-hidden="true">✓</b>}</div>)}</div>,document.body)}</div>;
+}

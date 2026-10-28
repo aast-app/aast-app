@@ -1,37 +1,57 @@
-import { createContext, useState, useContext } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { AuthContext } from './useAuth.js';
 
 import Loader from '../components/Loader';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const { ipcRenderer } = window.require('electron');
+import api from '../api';
 
-const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
-  // We start with null, meaning nobody is logged in yet.
   const [user, setUser] = useState(null);
+  const [isChecking, setIsChecking] = useState(true);
+  useEffect(() => {
+    let active = true;
+    const refresh = () => api.post('/auth-session').then(({ data }) => {
+      if (active) setUser(data.user);
+    }).catch(() => { if (active) setUser(null); }).finally(() => { if (active) setIsChecking(false); });
+    const expire = () => setUser(null);
+    const sync = event => { if (event.key === 'cept_auth_changed') refresh(); };
+    refresh();
+    window.addEventListener('storage', sync);
+    window.addEventListener('cept-session-expired', expire);
+    return () => { active = false; window.removeEventListener('storage', sync); window.removeEventListener('cept-session-expired', expire); };
+  }, []);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Function to save the user data when they successfully log in
-  const login = (userData) => {
+  const login = useCallback((userData) => {
     setUser(userData);
-  };
+    localStorage.removeItem('cept_user');
+    localStorage.setItem('cept_auth_changed', String(Date.now()));
+  }, []);
 
   // Function to clear the memory when they log out
   const logout = async () => {
     // Silent auto-backup triggers for ALL users on logout now
     setIsLoggingOut(true);
     try {
-      await ipcRenderer.invoke('admin-export-db', { 
-        adminUsername: user?.username || 'System', 
-        mode: 'silent' 
-      });
-    } catch (err) {
-      console.error("Silent backup failed during logout:", err);
+      const { data } = await api.post('/auth-logout');
+      if (!data.backupSaved) window.alert('You are signed out, but the automatic backup could not be saved. Please tell an administrator.');
+    } catch (error) {
+      if (error.response?.status !== 401) {
+        setIsLoggingOut(false);
+        window.alert('Sign out could not reach the server. Please try again.');
+        return;
+      }
     }
     setIsLoggingOut(false);
     setUser(null);
+    localStorage.removeItem('cept_user');
+    localStorage.setItem('cept_auth_changed', String(Date.now()));
   };
+
+  if (isChecking) return <Loader />;
 
   return (
     <AuthContext.Provider value={{ user, login, logout }}>
@@ -68,7 +88,3 @@ export function AuthProvider({ children }) {
   );
 }
 
-// A custom hook so any component can easily grab the user info
-export function useAuth() {
-  return useContext(AuthContext);
-}

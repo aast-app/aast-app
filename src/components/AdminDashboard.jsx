@@ -1,16 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth.js';
 import Loader from './Loader';
-const { ipcRenderer } = window.require('electron');
+import api from '../api';
+import { useApiQuery } from '../hooks/useApiQuery.js';
+import CustomSelect from './CustomSelect';
+import BackupRecovery from './BackupRecovery';
 
 export default function AdminDashboard() {
   const { user, login } = useAuth();
-  const [users, setUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: userData, error: usersError, loading: isLoading, refresh: fetchUsers } = useApiQuery('/admin-get-users', { adminUsername: user.username });
+  const users = userData?.users || [];
   const [isCreating, setIsCreating] = useState(false);
   const [message, setMessage] = useState('');
-  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [showBackups, setShowBackups] = useState(false);
 
   // Create User State
   const [newUsername, setNewUsername] = useState('');
@@ -27,55 +30,12 @@ export default function AdminDashboard() {
   // Delete User State
   const [userToDelete, setUserToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    setIsLoading(true);
-    try {
-      const response = await ipcRenderer.invoke('admin-get-users', { adminUsername: user.username });
-      if (response.success) {
-        setUsers(response.users);
-      } else {
-        setMessage(`Error: ${response.message}`);
-      }
-    } catch (error) {
-      setMessage('Failed to fetch users.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleManualBackup = async () => {
-    setMessage('');
-    setIsBackingUp(true);
-    try {
-      const response = await ipcRenderer.invoke('admin-export-db', {
-        adminUsername: user.username,
-        mode: 'manual'
-      });
-      if (response.success) {
-        setMessage(response.message);
-      } else {
-        if (response.message !== 'Export canceled by user.') {
-          setMessage(`Error: ${response.message}`);
-        }
-      }
-    } catch (error) {
-      setMessage('Failed to export database.');
-    } finally {
-      setIsBackingUp(false);
-    }
-  };
-
   const handleCreateUser = async (e) => {
     e.preventDefault();
     setMessage('');
     setIsCreating(true);
     try {
-      const response = await ipcRenderer.invoke('admin-create-user', {
+      const { data: response } = await api.post('/admin-create-user', {
         adminUsername: user.username,
         newUsername,
         newPassword,
@@ -91,7 +51,7 @@ export default function AdminDashboard() {
       } else {
         setMessage(`Error: ${response.message}`);
       }
-    } catch (error) {
+    } catch {
       setMessage('Failed to create user.');
     } finally {
       setIsCreating(false);
@@ -111,7 +71,7 @@ export default function AdminDashboard() {
     setMessage('');
     setIsEditing(true);
     try {
-      const response = await ipcRenderer.invoke('admin-edit-user', {
+      const { data: response } = await api.post('/admin-edit-user', {
         adminUsername: user.username,
         targetUsername: editingUser,
         newUsername: editUsername,
@@ -130,7 +90,7 @@ export default function AdminDashboard() {
       } else {
         setMessage(`Error: ${response.message}`);
       }
-    } catch (error) {
+    } catch {
       setMessage('Failed to edit user.');
     } finally {
       setIsEditing(false);
@@ -155,7 +115,7 @@ export default function AdminDashboard() {
     if (!userToDelete) return;
     setIsDeleting(true);
     try {
-      const response = await ipcRenderer.invoke('admin-delete-user', {
+      const { data: response } = await api.post('/admin-delete-user', {
         adminUsername: user.username,
         targetUsername: userToDelete
       });
@@ -167,45 +127,60 @@ export default function AdminDashboard() {
       } else {
         setMessage(`Error: ${response.message}`);
       }
-    } catch (error) {
+    } catch {
       setMessage('Failed to delete user.');
     } finally {
       setIsDeleting(false);
     }
   };
 
+  
+
   return (
-    <>
-      <div className="header-container" style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <AnimatePresence mode="wait">
+        <motion.div 
+          key="admin-dashboard"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          transition={{ duration: 0.3 }}
+          style={{ height: '100%' }}
+        >
+      
+      
+      
+      {showBackups && <BackupRecovery onClose={() => setShowBackups(false)} />}
+      <div className="header-container"
+
+ style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-hero-title">
-            Admin <span className="gradient-text">Dashboard</span>
+            Admin <span className="gradient-text">control</span>
           </h1>
           <p className="text-muted" style={{ fontSize: '1rem', marginTop: '0.5rem' }}>
-            Manage System Users
+            Manage team accounts, permissions, and backups.
           </p>
         </div>
         <button 
-          onClick={handleManualBackup} 
+          onClick={() => setShowBackups(true)} 
           className="gradient-btn secondary" 
           style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
-          disabled={isBackingUp}
         >
-          {isBackingUp ? 'EXPORTING...' : 'BACKUP DATABASE'}
+          BACKUPS & RECOVERY
         </button>
       </div>
 
-      {message && (
-        <div className={`admin-message-box ${message.startsWith('Error') ? 'error' : 'success'}`}>
-          {message}
+      {(message || usersError) && (
+        <div className={`admin-message-box ${(usersError || message.startsWith('Error')) ? 'error' : 'success'}`}>
+          {message || usersError}
         </div>
       )}
 
       <div className="admin-content-wrapper">
         
         {/* Left Column: Create User Form */}
-        <div className="admin-sidebar">
-          <div className="glass-card" style={{ marginBottom: '1.5rem' }}>
+        <div className="admin-sidebar workspace-admin-panels">
+          <div className="glass-card">
             <h2 className="glass-card-title">Create Account</h2>
             {isCreating ? (
               <div style={{ padding: '2rem' }}><Loader /></div>
@@ -234,23 +209,18 @@ export default function AdminDashboard() {
                   </div>
                   <div className="modern-input-container role-select-container">
                     <label className="modern-label">Role</label>
-                    <select 
-                      className="modern-input"
-                      value={newRole}
-                      onChange={(e) => setNewRole(e.target.value)}
-                    >
-                      <option value="user">User</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                    <CustomSelect label="Role" minWidth="0" value={newRole} onChange={(e) => setNewRole(e.target.value)} options={[{label:"User",value:"user"},{label:"Admin",value:"admin"}]} />
                   </div>
                 </div>
                 <button type="submit" className="gradient-btn admin-submit-btn" style={{ marginTop: '1rem' }}>
                   CREATE USER
                 </button>
               </form>
-            )}
+              )}
+            </div>
+
+
           </div>
-        </div>
 
         {/* Right Column: User Roster */}
         <div className="admin-main-area">
@@ -353,14 +323,7 @@ export default function AdminDashboard() {
                   
                   <div className="modern-input-container role-select-container">
                     <label className="modern-label">Role</label>
-                    <select 
-                      className="modern-input"
-                      value={editRole}
-                      onChange={(e) => setEditRole(e.target.value)}
-                    >
-                      <option value="user">User</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                    <CustomSelect label="Role" minWidth="0" value={editRole} onChange={(e) => setEditRole(e.target.value)} options={[{label:"User",value:"user"},{label:"Admin",value:"admin"}]} />
                   </div>
                   
                   <div className="modal-action-row">
@@ -417,6 +380,7 @@ export default function AdminDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
-    </>
+            </motion.div>
+    </AnimatePresence>
   );
 }

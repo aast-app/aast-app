@@ -1,0 +1,12 @@
+archive/
+**/*.db
+**/*.db-*
+**/*.sqlite*
+**/backups/
+**/.env
+**/.env.*
+server/test/
+server/.agents/
+server/.claude/
+server/.windsurf/
+.git/

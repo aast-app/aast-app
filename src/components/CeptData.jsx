@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
-const { ipcRenderer } = window.require('electron');
+import { useState, useMemo } from 'react';
+import api from '../api';
+import { useApiQuery } from '../hooks/useApiQuery.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import Loader from './Loader';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth.js';
 import IdsModal from './IdsModal';
 import ScoresModal from './ScoresModal';
+
 
 // Helper to get Friday of the current week
 const getStartOfWeek = (date) => {
@@ -38,37 +40,16 @@ function CeptData() {
   const { user } = useAuth();
   const [currentWeekStart, setCurrentWeekStart] = useState(getStartOfWeek(new Date()));
   const [weekOffset, setWeekOffset] = useState(0); // 0 = current, negative = past, positive = future
-  const [weekDates, setWeekDates] = useState([]);
-  const [opsMap, setOpsMap] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
+  const weekDates = useMemo(() => Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(currentWeekStart);
+    date.setDate(date.getDate() + index);
+    return date;
+  }), [currentWeekStart]);
+  const { data: operations, error: operationsError, loading: isLoading, refresh: fetchOperations } = useApiQuery('/get-week-operations', { dates: weekDates.map(formatDate) });
+  const opsMap = operations?.data || {};
   const [activeModal, setActiveModal] = useState(null);
   const [editModeDays, setEditModeDays] = useState({}); // Track rows in edit mode // { type: 'ids' | 'scores', date: 'YYYY-MM-DD', displayDate: '' }
-
-  useEffect(() => {
-    // Generate the 7 days of the week starting from currentWeekStart
-    const dates = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(currentWeekStart);
-      d.setDate(d.getDate() + i);
-      dates.push(d);
-    }
-    setWeekDates(dates);
-    fetchOperations(dates.map(d => formatDate(d)));
-  }, [currentWeekStart]);
-
-  const fetchOperations = async (datesArr) => {
-    setIsLoading(true);
-    try {
-      const response = await ipcRenderer.invoke('get-week-operations', { dates: datesArr });
-      if (response.success) {
-        setOpsMap(response.data);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  
 
   const handlePrevWeek = () => {
     if (weekOffset <= -4) return;
@@ -92,29 +73,15 @@ function CeptData() {
   };
 
   const openModal = async (type, dateObj) => {
-    try {
-      const lockRes = await ipcRenderer.invoke('acquire-lock', { username: user.username });
-      if (!lockRes.success) {
-        alert(lockRes.message);
-        return;
-      }
-      setActiveModal({
-        type,
-        date: formatDate(dateObj),
-        displayDate: formatDisplayDate(dateObj),
-        dayName: getDayName(dateObj)
-      });
-    } catch (err) {
-      alert("Failed to connect to database lock: " + err.message);
-    }
+    setActiveModal({
+      type,
+      date: formatDate(dateObj),
+      displayDate: formatDisplayDate(dateObj),
+      dayName: getDayName(dateObj)
+    });
   };
 
   const closeModalAndRefresh = async () => {
-    try {
-      await ipcRenderer.invoke('release-lock', { username: user.username });
-    } catch (e) {
-      console.error("Failed to release lock:", e);
-    }
     setActiveModal(null);
     setEditModeDays({}); // Exit edit mode on close
     fetchOperations(weekDates.map(d => formatDate(d)));
@@ -126,7 +93,7 @@ function CeptData() {
 
     if (isActivatingEdit) {
       try {
-        await ipcRenderer.invoke('log-frontend-action', {
+        await api.post('log-frontend-action', {
           username: user.username,
           action: 'Edit Day',
           details: `Unlocked edit mode for ${dateStr}`,
@@ -142,29 +109,15 @@ function CeptData() {
     try {
       const targetDate = formatDate(dateObj);
       
-      // Optimistic update
-      setOpsMap(prev => {
-        const dateObjVal = new Date(targetDate);
-        const day = dateObjVal.getDay();
-        const isWeekend = (day === 5 || day === 6);
-
-        const currentOps = prev[targetDate] || { 
-          idsUploaded: false, 
-          scoresUploaded: false,
-          idsNotNeeded: isWeekend,
-          scoresNotNeeded: isWeekend
-        };
-        const newOps = { ...currentOps };
-        if (type === 'both' || type === 'ids') newOps.idsNotNeeded = !currentValue;
-        if (type === 'both' || type === 'scores') newOps.scoresNotNeeded = !currentValue;
-        return { ...prev, [targetDate]: newOps };
-      });
-
       // Background request
-      ipcRenderer.invoke('toggle-not-needed', {
+      await api.post('/toggle-not-needed', {
         targetDate,
         type,
-        value: !currentValue
+        value: !currentValue,
+        username: user.username
+      }).then(({ data }) => {
+        if (!data.success) throw new Error(data.message);
+        fetchOperations();
       }).catch(error => {
         console.error(error);
         fetchOperations(weekDates.map(d => formatDate(d))); // Revert if fails
@@ -176,11 +129,17 @@ function CeptData() {
 
   return (
     <>
-      <div className="flex justify-between items-center cept-header-container">
-        <h1 className="cept-page-title page-hero-title">
-          CEPT <span className="gradient-text">Data</span>
-        </h1>
-      </div>
+      {operationsError && <p role="alert">{operationsError}</p>}
+        <div className="flex justify-between items-center cept-header-container" style={{ width: '100%' }}>
+          <h1 className="cept-page-title page-hero-title">
+            CEPT <span className="gradient-text">Data</span>
+          </h1>
+          <div className="flex items-center gap-4">
+            
+          </div>
+        </div>
+
+      
 
       <div className="cept-calendar-wrapper">
         <div className="flex justify-between items-center cept-calendar-header">

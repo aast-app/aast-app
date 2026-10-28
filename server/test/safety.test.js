@@ -1,0 +1,198 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile, readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+test('permissions, atomic imports and complete encrypted recovery', async t => {
+  const folder = await mkdtemp(fileURLToPath(new URL('./.cept-browser-safety-', import.meta.url)));
+  const serverRoot = fileURLToPath(new URL('../', import.meta.url));
+  process.env.DATABASE_URL = `file:${path.join(folder, 'test.db').replaceAll('\\', '/')}`;
+  process.env.BACKUP_DIR = path.join(folder, 'backups');
+  process.env.SSO_JWT_SECRET = 'fixture-secret-only-not-a-real-secret';
+  await writeFile(path.join(folder, 'test.db'), '');
+  let server, prisma;
+  try {
+    execFileSync(process.execPath, [path.join(serverRoot, 'node_modules/prisma/build/index.js'), 'db', 'push', '--skip-generate', '--schema', path.join(serverRoot, 'prisma/schema.prisma')], { env: process.env, stdio: 'pipe' });
+    ({ prisma } = await import('../src/db/connect.js'));
+    const { default: bcrypt } = await import('bcryptjs');
+    const { default: app } = await import('../src/app.js');
+    const { snapshot, encryptBackup, buildBackup } = await import('../src/services/backup.js');
+    const { default: jwt } = await import('jsonwebtoken');
+    await prisma.user.create({ data: { username: 'admin', password: await bcrypt.hash('admin-password', 4), role: 'admin' } });
+    await prisma.user.create({ data: { username: 'staff', password: await bcrypt.hash('staff-password', 4), role: 'user' } });
+    server = app.listen(0, '127.0.0.1');
+    await new Promise(resolve => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    function client() {
+      let cookie = '';
+      return {
+        async call(endpoint, body = {}, status = 200, extra = {}, expectedSuccess = true) {
+          const response = await fetch(`${base}/api/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CEPT-Request': '1', Cookie: cookie, ...extra }, body: JSON.stringify(body) });
+          if (response.headers.get('set-cookie')) cookie = response.headers.get('set-cookie').split(';')[0];
+          const data = await response.json();
+          assert.equal(response.status, status, `${endpoint}: ${JSON.stringify(data)}`);
+          if (status === 200) assert.equal(data.success, expectedSuccess, JSON.stringify(data));
+          return data;
+        },
+      };
+    }
+    const admin = client(), staff = client(), anonymous = client();
+    await t.test('verified sessions prevent impersonation, cross-site writes and revoked account access', async () => {
+      await anonymous.call('admin-get-users', { adminUsername: 'admin' }, 401);
+      await admin.call('auth-login', { username: 'admin', password: 'admin-password' });
+      await staff.call('auth-login', { username: 'staff', password: 'staff-password' });
+      for (const endpoint of ['admin-get-users', 'admin-export-db', 'admin-preview-backup', 'admin-restore-backup', 'upload-master-data-chunk', 'get-dashboard-details']) await staff.call(endpoint, { adminUsername: 'admin', username: 'admin' }, 403);
+      await staff.call('log-frontend-action', { username: 'admin', action: 'Edit Day', details: 'fixture' });
+      assert.equal((await prisma.log.findFirst({ where: { details: 'fixture' } })).username, 'staff');
+      await admin.call('toggle-not-needed', { targetDate: '2026-10-27', type: 'both', value: true }, 403, { Origin: 'https://untrusted.invalid' });
+      await admin.call('auth-session', {}, 403, { 'X-CEPT-Request': '' });
+      await prisma.user.update({ where: { username: 'staff' }, data: { role: 'admin' } });
+      await staff.call('admin-get-users');
+      await prisma.user.update({ where: { username: 'staff' }, data: { role: 'user', isDeleted: true } });
+      await staff.call('auth-session', {}, 401);
+      await prisma.user.update({ where: { username: 'staff' }, data: { isDeleted: false } });
+      await staff.call('auth-login', { username: 'staff', password: 'staff-password' });
+      const token = jwt.sign({ username: 'portal-user', role: 'user', jti: 'one-use-fixture' }, process.env.SSO_JWT_SECRET, { expiresIn: '1m' });
+      await anonymous.call('auth-sso-login', { token });
+      const replay = await anonymous.call('auth-sso-login', { token }, 200, {}, false);
+      assert.equal(replay.success, false);
+      await prisma.user.update({ where: { username: 'staff' }, data: { password: await bcrypt.hash('changed-password', 4) } });
+      await staff.call('auth-session', {}, 401);
+      await staff.call('auth-login', { username: 'staff', password: 'changed-password' });
+    });
+    const stage = (rows, extra = {}) => admin.call('upload-master-data-chunk', { fileName: 'fixture.xlsx', totalRows: rows.length, chunkIndex: 0, isLastChunk: true, dataRows: rows, ...extra });
+    await t.test('staging, validation, ownership, atomic rollback, stale previews and safe retries', async () => {
+      const first = await stage([['001', 'Last', 'First', '', '']], { totalRows: 2, isLastChunk: false });
+      assert.equal(await prisma.student.count(), 0);
+      await admin.call('upload-master-data-chunk', { uploadId: first.uploadId, fileName: 'fixture.xlsx', totalRows: 2, chunkIndex: 1, isLastChunk: true, dataRows: [['002', 'Last', 'First', 'not a score', '']] }, 400);
+      assert.equal(await prisma.student.count(), 0);
+      const preview = await stage([['001', 'Last', 'First', '', ''], ['002', 'Second', 'Name', '', '']]);
+      assert.equal(await prisma.student.count(), 0);
+      await staff.call('commit-import', { draftId: preview.draftId }, 409);
+      await admin.call('commit-import', { draftId: preview.draftId });
+      const logCount = await prisma.log.count();
+      await admin.call('commit-import', { draftId: preview.draftId });
+      assert.equal(await prisma.log.count(), logCount);
+      assert.equal((await prisma.uploadHistory.findFirst()).recordsUpdated, 2);
+      const stale = await stage([['001', 'Replacement', 'Name', 99, 'B2']]);
+      await prisma.student.update({ where: { registrationNumber: '002' }, data: { firstName: 'Changed' } });
+      await admin.call('commit-import', { draftId: stale.draftId }, 409);
+      assert.equal((await prisma.student.findUnique({ where: { registrationNumber: '001' } })).score, null);
+      const activityDate = new Date().toLocaleDateString('en-CA');
+      await prisma.dailyMetaData.create({ data: { activityDate, ceptData: 'damaged' } });
+      const scores = await staff.call('preview-scores', { targetDate: '2026-10-27', scores: [{ rawRegNum: '001', score: 80, value: 'B2' }] });
+      await staff.call('commit-import', { draftId: scores.draftId }, 500);
+      assert.equal((await prisma.student.findUnique({ where: { registrationNumber: '001' } })).score, null);
+      assert.equal(await prisma.dailyOperation.count({ where: { date: '2026-10-27' } }), 0);
+      await prisma.dailyMetaData.update({ where: { activityDate }, data: { ceptData: '[]' } });
+      await staff.call('commit-import', { draftId: scores.draftId });
+      assert.equal((await prisma.student.findUnique({ where: { registrationNumber: '001' } })).score, 80);
+      const ids = await staff.call('preview-ids', { targetDate: '2026-10-27', files: [{ fileName: 'preview.xlsx', sheets: [{ name: 'Students', rows: [['RegNum', 'Name', 'Email', 'Mobile', 'Date', 'Time'], ['003', 'Preview Only', '', '', '', '']] }] }] });
+      assert.equal(await prisma.student.count({ where: { registrationNumber: '003' } }), 0);
+      await staff.call('discard-import', { draftId: ids.draftId });
+      await staff.call('commit-import', { draftId: ids.draftId }, 409);
+      await staff.call('preview-scores', { targetDate: '2026-99-99', scores: [{ rawRegNum: '001', score: 80, value: 'B2' }] }, 400);
+    });
+    await t.test('encrypted backup restores every table, preserves a safety copy, and signs everyone out', async () => {
+      const passphrase = 'portable-fixture-passphrase';
+      const before = await snapshot(prisma);
+      const download = await admin.call('admin-export-db', { mode: 'manual', passphrase });
+      assert.equal(download.backup.format, 'cept-encrypted-backup');
+      assert.ok(!JSON.stringify(download.backup).includes('admin-password'));
+      await admin.call('admin-preview-backup', { backup: download.backup, passphrase: 'wrong-password-long' }, 400);
+      const damaged = { ...download.backup, data: 'AAAA' + download.backup.data.slice(4) };
+      await admin.call('admin-preview-backup', { backup: damaged, passphrase }, 400);
+      const invalid = await buildBackup('fixture');
+      invalid.collections.student[0].score = 'bad';
+      await admin.call('admin-preview-backup', { backup: await encryptBackup(invalid, passphrase), passphrase }, 400);
+      assert.equal(await prisma.student.count(), before.student.length);
+      await prisma.student.updateMany({ data: { score: 5 } });
+      await prisma.user.update({ where: { username: 'staff' }, data: { email: 'changed@example.invalid' } });
+      const review = await admin.call('admin-preview-backup', { backup: download.backup, passphrase });
+      assert.equal(review.counts.student, before.student.length);
+      await admin.call('admin-restore-backup', { restoreToken: review.restoreToken, confirmation: 'wrong' }, 400);
+      await prisma.log.create({ data: { username: 'fixture', action: 'Concurrent change' } });
+      await admin.call('admin-restore-backup', { restoreToken: review.restoreToken, confirmation: 'RESTORE' }, 409);
+      assert.equal((await prisma.student.findFirst()).score, 5);
+      const fresh = await admin.call('admin-preview-backup', { backup: download.backup, passphrase });
+      const result = await admin.call('admin-restore-backup', { restoreToken: fresh.restoreToken, confirmation: 'RESTORE' });
+      assert.ok(result.safetyFileName.startsWith('before_restore_'));
+      const after = await snapshot(prisma);
+      for (const model of ['user', 'student', 'dailyOperation', 'dailyMetaData', 'uploadHistory', 'registrationBatch']) assert.deepEqual(after[model], before[model], model);
+      assert.equal(after.log.length, before.log.length + 1);
+      await admin.call('auth-session', {}, 401);
+      await staff.call('auth-session', {}, 401);
+      await admin.call('auth-login', { username: 'admin', password: 'admin-password' });
+      const backups = await admin.call('admin-list-backups');
+      assert.ok(backups.backups.some(file => file.fileName === result.safetyFileName));
+      assert.ok((await readdir(process.env.BACKUP_DIR)).includes('.backup-key'));
+      const automatic = await admin.call('admin-export-db', { mode: 'silent' });
+      const serverPreview = await admin.call('admin-preview-backup', { fileName: automatic.fileName });
+      assert.equal(serverPreview.counts.student, before.student.length);
+      await admin.call('auth-logout');
+      await admin.call('auth-session', {}, 401);
+    });
+    if (process.env.CEPT_SAFETY_BROWSER === '1') await browserSafety(base, folder, prisma);
+  } finally {
+    if (server) await new Promise(resolve => server.close(resolve));
+    if (prisma) await prisma.$disconnect();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+async function browserSafety(base, folder, prisma) {
+  const { chromium } = await import('playwright');
+  const { readFile } = await import('node:fs/promises');
+  const { default: XLSX } = await import('xlsx');
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    const page = await browser.newPage({ acceptDownloads: true });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/*', route => route.request().url().startsWith(base) || /^(data|blob):/.test(route.request().url()) ? route.continue() : route.abort());
+    await page.addInitScript(() => { globalThis.showSaveFilePicker = undefined; localStorage.setItem('cept_user', JSON.stringify({ username: 'admin', role: 'admin' })); });
+    await page.goto(`${base}/#/admin`);
+    await page.getByLabel('Username', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('navigation', { name: 'Main navigation' }).count(), 0);
+    await page.getByLabel('Username', { exact: true }).fill('admin');
+    await page.getByLabel('Password', { exact: true }).fill('admin-password');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('link', { name: 'Admin control' }).click();
+    const cookie = (await page.context().cookies()).find(cookie => cookie.name === 'cept_session');
+    assert.equal(cookie.httpOnly, true);
+    assert.equal(await page.getByRole('heading', { name: 'Manage Master Database', exact: true }).count(), 0);
+    await page.getByRole('link', { name: 'Master database' }).click();
+    await page.getByRole('heading', { name: 'Master database', exact: true }).waitFor();
+    await page.getByRole('columnheader', { name: 'Reg Number', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Show Student Data', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Upload/Update Master Data', exact: true }).isVisible(), true);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['Registration Number', 'Last Name', 'First Name', 'Score', 'Value'], ['UI-PREVIEW', 'Preview', 'Student', '', '']]), 'Master');
+    await page.locator('input[type=file]').setInputFiles({ name: 'preview.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) });
+    await page.getByRole('heading', { name: 'Review master import' }).waitFor();
+    assert.equal(await prisma.student.count({ where: { registrationNumber: 'UI-PREVIEW' } }), 0);
+    await page.getByRole('button', { name: 'Discard preview', exact: true }).click();
+    assert.equal(await prisma.student.count({ where: { registrationNumber: 'UI-PREVIEW' } }), 0);
+    await page.getByRole('link', { name: 'Admin control' }).click();
+    await page.getByRole('button', { name: 'BACKUPS & RECOVERY', exact: true }).click();
+    await page.getByLabel('Backup passphrase', { exact: true }).fill('browser-fixture-passphrase');
+    const pending = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'DOWNLOAD ENCRYPTED BACKUP', exact: true }).click();
+    const download = await pending;
+    const target = path.join(folder, 'browser-backup.json');
+    await download.saveAs(target);
+    const envelope = JSON.parse(await readFile(target, 'utf8'));
+    assert.equal(envelope.format, 'cept-encrypted-backup');
+    await page.getByLabel('Choose a file', { exact: true }).setInputFiles(target);
+    await page.getByLabel('File passphrase (downloaded backups)', { exact: true }).fill('browser-fixture-passphrase');
+    await page.getByRole('button', { name: 'PREVIEW RECOVERY', exact: true }).click();
+    await page.getByRole('columnheader', { name: 'After recovery', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'RESTORE THIS BACKUP', exact: true }).isEnabled(), false);
+    await page.getByLabel('Type RESTORE to confirm').fill('RESTORE');
+    assert.equal(await page.getByRole('button', { name: 'RESTORE THIS BACKUP', exact: true }).isEnabled(), true);
+    await page.getByRole('button', { name: 'Close backups', exact: true }).click();
+    assert.deepEqual(errors, [], errors.join('\n'));
+  } finally { await browser.close(); }
+}

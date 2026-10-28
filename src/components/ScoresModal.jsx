@@ -1,78 +1,142 @@
-import React, { useState, useEffect } from 'react';
-const { ipcRenderer } = window.require('electron');
-import { motion, AnimatePresence } from 'framer-motion';
-import Loader from './Loader';
-import { useAuth } from '../context/AuthContext';
-import LockTimer from './LockTimer';
+import { cleanScoreWorkbook } from '../features/scores/export.js';
+import { validateHeaders } from '../utils/spreadsheetHeaders.js';
+import { useImportDraft } from '../hooks/useImportDraft.js';
+import { createDownloadTarget } from '../utils/download.js';
+import { useMemo, useState } from 'react';
+import api from '../api';
+import ReviewDialog, { ReviewBusy, ReviewError, ReviewNotice, ReviewSuccess } from './review/ReviewDialog';
+import ReviewUpload from './review/ReviewUpload';
+import ReviewFiles from './review/ReviewFiles';
+import { scoreReviewFiles } from './review/reviewData.js';
+import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 
 function ScoresModal({ modalData, onClose }) {
-  const { user } = useAuth();
+  const draft = useImportDraft();
   
-  const [baseUploadMessage, setBaseUploadMessage] = useState('');
-  const [isBaseLoaded, setIsBaseLoaded] = useState(false);
-  
-  const [scoresUploadMessage, setScoresUploadMessage] = useState('');
-  const [scoresDataPreview, setScoresDataPreview] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [saved, setSaved] = useState(false);
   const [isScoresLoaded, setIsScoresLoaded] = useState(false);
   
-  const [processedScores, setProcessedScores] = useState(null);
+  const [transformedData, setTransformedData] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState('');
 
-  useEffect(() => {
-    handleUploadBaseData();
-  }, []);
+  const reviewFiles = useMemo(() => scoreReviewFiles(transformedData), [transformedData]);
+  const changedCount = transformedData.reduce((count, file) => count + file.rows.filter(row => row.regNumRaw !== row.strippedRegNum).length, 0);
+  const studentCount = transformedData.reduce((count, file) => count + file.rows.length, 0);
 
-  const handleUploadBaseData = async () => {
+  const handleUploadScoresData = async (files) => {
+    if (!files.length) return;
+
+    draft.prepare(null);
+    setTransformedData([]);
+    setIsScoresLoaded(false);
     setIsProcessing(true);
+    setExportMessage(''); setPreview(null);
+    
     try {
-      const response = await ipcRenderer.invoke('upload-base-data', { username: user.username });
-      if (response.success) {
-        setIsBaseLoaded(true);
-        setBaseUploadMessage('');
-      } else {
-        setIsBaseLoaded(false);
-        setBaseUploadMessage(`Error: ${response.message}`);
-      }
-    } catch (error) {
-      setBaseUploadMessage(`Error: ${error.message}`);
-      setIsBaseLoaded(false);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+      const parsedFiles = [];
+      const allScores = [];
 
-  const handleUploadScoresData = async () => {
-    try {
-      const response = await ipcRenderer.invoke('upload-scores-data', { username: user.username });
-      if (response.success) {
-        setScoresUploadMessage('');
-        setScoresDataPreview(response.count);
-        setIsScoresLoaded(true);
-        // Auto-trigger process
-        handleProcessScores();
-      } else if (response.message !== 'Upload canceled by user.') {
-        setScoresUploadMessage(response.message);
-        setIsScoresLoaded(false);
-      }
-    } catch (error) {
-      setScoresUploadMessage(`Error: ${error.message}`);
-      setIsScoresLoaded(false);
-    }
-  };
+      // 1. Read files
+      for (const file of files) {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array', cellStyles: true, raw: true });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        validateHeaders(XLSX.utils.sheet_to_json(sheet, { header: 1 })[0] || [], 'scores');
+        const range = XLSX.utils.decode_range(sheet['!ref'] || "A1:A1");
 
-  const handleProcessScores = async () => {
-    setIsProcessing(true);
-    try {
-      const response = await ipcRenderer.invoke('process-scores', { username: user.username });
-      if (response.success) {
-        setProcessedScores(response);
-      } else {
-        alert(response.message);
+        const rows = [];
+        const getCellStr = (c, r) => {
+          const cell = sheet[XLSX.utils.encode_cell({ c, r })];
+          return cell && cell.v !== undefined ? String(cell.w !== undefined ? cell.w : cell.v).trim() : '';
+        };
+
+        for (let R = 1; R <= range.e.r; ++R) {
+          const regNumRaw = getCellStr(0, R); // Column A
+          if (regNumRaw === '') continue;
+
+          let strippedRegNum = regNumRaw;
+          const match = regNumRaw.match(/^(.*?)-R(\d+)$/i);
+          if (match) {
+            strippedRegNum = match[1];
+          }
+
+          const scoreRaw = getCellStr(3, R); // Column D
+          const valueRaw = getCellStr(4, R); // Column E
+          
+          let score = null;
+          if (scoreRaw !== '') {
+            if (!Number.isFinite(Number(scoreRaw))) throw new Error(`Invalid score on row ${R + 1} in ${file.name}.`);
+            score = Number(scoreRaw);
+          }
+
+          const value = valueRaw !== '' ? valueRaw : null;
+
+          rows.push({
+            r: R, // Row index
+            regNumRaw,
+            strippedRegNum,
+            score,
+            value
+          });
+
+          allScores.push({
+            rawRegNum: regNumRaw,
+            strippedRegNum,
+            score,
+            value
+          });
+        }
+        
+        parsedFiles.push({
+          file,
+          originalBuffer: buffer,
+          workbook,
+          sheetName,
+          rows
+        });
       }
+
+
+      
+      // 2. Check and Upsert against DB
+      const response = await api.post('/preview-scores', { 
+        targetDate: modalData.date,
+        scores: allScores,
+        numFiles: files.length
+      });
+
+      if (!response.data.success) throw new Error(response.data.message);
+      
+      const unmatched = new Set(response.data.unmatchedNumbers);
+      draft.prepare(response.data.draftId);
+
+      // 3. Apply Strip Logic for Export
+      for (const pFile of parsedFiles) {
+        const sheet = pFile.workbook.Sheets[pFile.sheetName];
+        for (const row of pFile.rows) {
+          row.matched = !unmatched.has(row.regNumRaw);
+          if (row.regNumRaw !== row.strippedRegNum) {
+            // Modify cell to stripped ID
+            const cellAddress = XLSX.utils.encode_cell({ c: 0, r: row.r });
+            sheet[cellAddress] = { ...sheet[cellAddress], t: 's', v: row.strippedRegNum };
+            delete sheet[cellAddress].w;
+            delete sheet[cellAddress].f;
+            row.wasModified = true;
+          }
+        }
+      }
+
+      setTransformedData(parsedFiles);
+      setPreview(response.data);
+      setIsScoresLoaded(true);
+
     } catch (error) {
-      console.error(error);
+      setExportMessage(error.response?.data?.message || error.message);
     } finally {
       setIsProcessing(false);
     }
@@ -80,153 +144,92 @@ function ScoresModal({ modalData, onClose }) {
 
   const handleExport = async () => {
     setIsExporting(true);
-    setExportMessage('');
+    setExportMessage('Please select where to save your files...');
+    
     try {
-      const response = await ipcRenderer.invoke('export-scores', { 
-        username: user.username,
-        targetDate: modalData.date
-      });
-      if (response.success) {
-        // Successfully exported, close modal
-        onClose();
-      } else if (response.message !== 'Export canceled by user.') {
-        setExportMessage(`Error: ${response.message}`);
+      if (transformedData.length === 1) {
+        const pFile = transformedData[0];
+        let fileHandle;
+        try {
+          fileHandle = await createDownloadTarget({
+            suggestedName: 'clean_' + pFile.file.name.replace(/\.[^/.]+$/, "") + '.xlsx',
+            types: [{
+              description: 'Excel Workbook',
+              accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+            }]
+          });
+        } catch {
+          setIsExporting(false);
+          setExportMessage('');
+          return;
+        }
+        
+        setExportMessage('Generating file...');
+        const buffer = await cleanScoreWorkbook(pFile);
+        await draft.commit();
+        const writable = await fileHandle.createWritable();
+        await writable.write(buffer);
+        await writable.close();
+        
+      } else {
+        let fileHandle;
+        try {
+          fileHandle = await createDownloadTarget({
+            suggestedName: `Scores_${modalData.displayDate.replace(/\s+/g, '_')}.zip`,
+            types: [{
+              description: 'ZIP Archive',
+              accept: { 'application/zip': ['.zip'] }
+            }]
+          });
+        } catch {
+          setIsExporting(false);
+          setExportMessage('');
+          return;
+        }
+
+        setExportMessage('Zipping files...');
+        const zip = new JSZip();
+        
+        for (const pFile of transformedData) {
+          const buffer = await cleanScoreWorkbook(pFile);
+          zip.file('clean_' + pFile.file.name.replace(/\.[^/.]+$/, "") + '.xlsx', buffer);
+        }
+        
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        await draft.commit();
+        const writable = await fileHandle.createWritable();
+        await writable.write(zipBlob);
+        await writable.close();
       }
+      
+      setExportMessage('');
+      setSaved(true);
+      
     } catch (error) {
-      setExportMessage(`Error: ${error.message}`);
+      setExportMessage(draft.isSaved() ? 'Records are saved, but the download failed. Retry to download without saving twice.' : `Save or download could not be completed: ${error.response?.data?.message || error.message}. Retry with this preview to check safely.`);
     } finally {
       setIsExporting(false);
     }
   };
 
-  return (
-    <div className="cept-modal-overlay" onClick={onClose}>
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="cept-modal-container"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-center cept-modal-header">
-          <h2 className="text-white page-hero-title cept-modal-title">
-            Check Scores <span className="gradient-text">{modalData.dayName}</span>
-          </h2>
-          <button className="cept-modal-close" onClick={onClose}>&times;</button>
-        </div>
+  const busy = isProcessing || isExporting;
+  function discard() { if (draft.draftId && !draft.isSaved()) api.post('/discard-import', { draftId: draft.draftId }).catch(() => {}); }
+  function close() { if (!busy) { discard(); onClose(); } }
+  function replace() { discard(); draft.prepare(null); setIsScoresLoaded(false); setTransformedData([]); setPreview(null); setExportMessage(''); }
+  const stage = saved ? 'saved' : isScoresLoaded ? 'review' : 'upload';
+  const error = busy ? '' : exportMessage;
+  return <ReviewDialog title="Check scores" eyebrow="RESULTS" date={modalData.date} dateLabel={modalData.displayDate} stage={stage} steps={['Upload results', 'Review matches', 'Save & download']} busy={busy} onClose={close}
+    footer={<><span className="review-footer-note"><span aria-hidden="true">{draft.isSaved() ? '✓' : '○'}</span>{draft.isSaved() ? 'Scores saved · database keeps full attempt IDs' : 'Preview only · nothing saved yet'}</span><div className="review-footer-actions">{saved ? <button className="review-button review-button--primary" onClick={close}>Done</button> : <><button className="review-button review-button--secondary" disabled={busy} onClick={close}>Cancel</button>{isScoresLoaded && <button className="review-button review-button--primary" disabled={busy || !draft.draftId} onClick={handleExport}>{isExporting ? 'Saving & downloading…' : draft.isSaved() ? 'Retry download' : preview?.unmatchedCount ? `Save ${preview.matchedCount} matched & download` : 'Save scores & download'}<span aria-hidden="true">↓</span></button>}</>}</div></>}>
+    {busy ? <ReviewBusy title={isProcessing ? 'Checking your score files' : draft.isSaved() ? 'Preparing your download' : 'Saving scores & preparing your file'}>{isProcessing ? 'Matching each full registration number to its exact test attempt.' : exportMessage || 'Keep this window open while the operation finishes.'}</ReviewBusy> : saved ? <ReviewSuccess title="Scores saved. Your file is ready.">{preview.matchedCount} matched results saved. The download uses cleaned registration numbers; the database keeps the full attempt IDs.{preview.unmatchedCount ? ` ${preview.unmatchedCount} unmatched rows were left unsaved.` : ''}</ReviewSuccess> : isScoresLoaded ? <>
+      <div className="review-section-heading"><div><h3>Review matches and cleaned IDs</h3><p>The uploaded attempt ID is used for saving. The adjusted number is used only in your download.</p></div><button type="button" className="review-text-button" onClick={replace}>Choose different files</button></div>
+      <p className="review-summary">{studentCount} students · {preview.matchedCount} matched · {changedCount} IDs cleaned</p>
+      <ReviewNotice tone={preview.unmatchedCount ? 'warning' : 'info'}>{preview.unmatchedCount ? `${preview.unmatchedCount} registration number${preview.unmatchedCount === 1 ? ' was' : 's were'} not found. Only matched results will be saved; all uploaded rows remain in the download.` : 'All attempts matched. Amber rows show where a retake suffix is removed from the download only.'}</ReviewNotice>
+      <ReviewFiles key={draft.draftId} files={reviewFiles} mode="scores" />
+    </> : <>
+      <ReviewUpload title="Bring in your exam results" description="Upload the score sheets for this exam day. We’ll match the full attempt IDs and preview the cleaned download." hint="Cambridge Group Report CSV and standard score workbooks are supported." inputLabel="Upload score files" onFiles={handleUploadScoresData} />
 
-        <LockTimer onClose={onClose} />
-
-        <p className="text-muted cept-modal-subtitle">
-          Injecting Cambridge scores for {modalData.displayDate}. <span className="cept-success-text">The Master File was synced automatically.</span>
-        </p>
-
-        {baseUploadMessage && (
-          <div className="cept-pill pending w-full mb-4 text-center">
-            {baseUploadMessage}
-          </div>
-        )}
-
-        <div className="cept-modal-body">
-          <AnimatePresence mode="wait">
-            {isProcessing ? (
-              <motion.div key="loader" className="flex flex-col items-center justify-center cept-modal-loader-container">
-                <Loader />
-                <p className="text-accent cept-modal-loader-text">PROCESSING SCORES...</p>
-              </motion.div>
-            ) : !processedScores ? (
-              <motion.div key="upload" className="flex flex-col items-center cept-modal-upload-box">
-                <div className="cept-modal-upload-icon">↑</div>
-                <h3 className="cept-modal-upload-title">Upload Cambridge CSV</h3>
-                <p className="text-muted cept-modal-upload-desc">
-                  Select the raw Cambridge CSV file to inject grades into your master database.
-                </p>
-                <button 
-                  className="gradient-btn primary" 
-                  onClick={handleUploadScoresData}
-                  disabled={!isBaseLoaded}
-                >
-                  Browse Files
-                </button>
-                {scoresUploadMessage && <p className="cept-modal-error-msg">{scoresUploadMessage}</p>}
-              </motion.div>
-            ) : (
-              <motion.div key="preview" className="flex flex-col w-full">
-                <div className="flex justify-between items-center cept-modal-preview-header">
-                  <div>
-                    <h3 className="cept-modal-preview-title">Processing Complete</h3>
-                    <p className="text-muted cept-modal-preview-subtitle">
-                      <strong className="text-accent">{processedScores.matchedCount}</strong> injected into Master Data.
-                    </p>
-                    {(processedScores.unmatchedList.length > 0 || processedScores.fullyScoredList.length > 0) && (
-                      <div className="cept-modal-errors" style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>
-                        {processedScores.unmatchedList.length > 0 && (
-                          <p style={{ color: '#ef4444', marginBottom: '0.5rem' }}>
-                            <strong>Missing IDs:</strong> {processedScores.unmatchedList.length} not found in Master.
-                          </p>
-                        )}
-                        {processedScores.fullyScoredList.length > 0 && (
-                          <p style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '0.5rem', borderRadius: '4px', color: '#ef4444' }}>
-                            <strong>Fully Scored:</strong> {processedScores.fullyScoredList.length} already maxed out all Retake slots.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="cept-modal-preview-actions">
-                    {exportMessage && <p className="cept-modal-export-error">{exportMessage}</p>}
-                    <button className="gradient-btn secondary" onClick={handleExport} disabled={isExporting}>
-                      {isExporting ? 'EXPORTING...' : 'EXPORT AAST XLSX & COMPLETE'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Table Preview */}
-                <div className="cept-modal-table-container">
-                  <h4 className="cept-modal-table-title">AAST Ready Export Preview</h4>
-                  <table className="results-table w-full">
-                    <thead>
-                      <tr>
-                        <th>Original ID</th>
-                        <th>Changed ID</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {processedScores.cleanData.map((row, index) => {
-                        const isMissing = processedScores.unmatchedList.includes(row.rawRegNum);
-                        const isFullyScored = processedScores.fullyScoredList.includes(row.rawRegNum);
-                        
-                        return (
-                          <tr key={index}>
-                            <td className="opacity-50" title={row.rawRegNum}>
-                              {isMissing ? (
-                                <span style={{ color: '#ef4444', fontWeight: 'bold' }}>{row.rawRegNum}</span>
-                              ) : isFullyScored ? (
-                                <span style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.4)', fontWeight: 'bold' }}>
-                                  {row.rawRegNum}
-                                </span>
-                              ) : (
-                                row.rawRegNum
-                              )}
-                            </td>
-                            <td><span className={row.strippedRegNum !== row.rawRegNum ? 'cell-modified' : ''}>{row.strippedRegNum}</span></td>
-                            <td>
-                              {row.isMatched ? <span className="text-accent">Updated</span> : <span className="opacity-50">Ignored / Error</span>}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </motion.div>
-    </div>
-  );
+    </>}
+    <ReviewError message={error} />
+  </ReviewDialog>;
 }
-
 export default ScoresModal;

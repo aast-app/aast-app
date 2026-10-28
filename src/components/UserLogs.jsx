@@ -1,21 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useAuth } from '../context/AuthContext';
+import { useState } from 'react';
+
+import { useAuth } from '../context/useAuth.js';
 import Loader from './Loader';
 import CustomSelect from './CustomSelect';
-const { ipcRenderer } = window.require('electron');
+import { useApiQuery } from '../hooks/useApiQuery.js';
 
 export default function UserLogs() {
   const { user } = useAuth();
   
   // Data State
-  const [logs, setLogs] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [totalItems, setTotalItems] = useState(0);
 
   // Filter Options State (from DB)
-  const [availableUsers, setAvailableUsers] = useState([]);
-  const [availableActions, setAvailableActions] = useState([]);
 
   // Active Filters State
   const [filterUser, setFilterUser] = useState('All Users');
@@ -27,48 +22,14 @@ export default function UserLogs() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
 
-  useEffect(() => {
-    fetchFilters();
-  }, []);
-
-  useEffect(() => {
-    fetchLogs();
-  }, [filterUser, filterAction, filterType, filterDate, page, limit]);
-
-  const fetchFilters = async () => {
-    try {
-      const response = await ipcRenderer.invoke('admin-get-log-filters', { adminUsername: user.username });
-      if (response.success) {
-        setAvailableUsers(response.users);
-        setAvailableActions(response.actions);
-      }
-    } catch (error) {
-      console.error('Error fetching filters:', error);
-    }
-  };
-
-  const fetchLogs = async () => {
-    setIsLoading(true);
-    try {
-      const response = await ipcRenderer.invoke('admin-get-logs', {
-        adminUsername: user.username,
-        filterUser,
-        filterAction,
-        filterType,
-        filterDate,
-        page,
-        limit
-      });
-      if (response.success) {
-        setLogs(response.logs);
-        setTotalItems(response.total);
-      }
-    } catch (error) {
-      console.error('Error fetching logs:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const { data: filters, error: filterError } = useApiQuery('/admin-get-log-filters', { adminUsername: user.username });
+  const { data: result, error: logError, loading: isLoading } = useApiQuery('/admin-get-logs', {
+    adminUsername: user.username, filterUser, filterAction, filterType, filterDate, page, limit,
+  });
+  const availableUsers = filters?.users || [];
+  const availableActions = filters?.actions || [];
+  const logs = result?.logs || [];
+  const totalItems = result?.total || 0;
 
   const getBadgeClass = (action) => {
     switch (action) {
@@ -168,9 +129,10 @@ export default function UserLogs() {
 
   return (
     <>
+      {(logError || filterError) && <p role="alert">{logError || filterError}</p>}
       <div className="header-container flex flex-col gap-2 mb-6">
         <h1 className="page-hero-title">
-          System <span className="gradient-text">Logs</span>
+          Activity <span className="gradient-text">log</span>
         </h1>
       </div>
 
@@ -212,7 +174,7 @@ export default function UserLogs() {
               />
 
               <input 
-                type="date" 
+                type="date" aria-label="Filter by date"
                 className="log-filter-select" 
                 value={filterDate} 
                 onChange={(e) => { setFilterDate(e.target.value); setPage(1); }} 
@@ -225,59 +187,26 @@ export default function UserLogs() {
               </button>
             )}
           </div>
-          <div className="logs-table-container flex-1 overflow-auto w-full rounded-md">
+          <div className="activity-stream">
             {isLoading ? (
               <div className="flex w-full h-full items-center justify-center py-20">
                 <Loader />
               </div>
             ) : (
-              <table className="logs-table w-full text-left">
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Action</th>
-                    <th>Details</th>
-                    <th>Meta Data</th>
-                    <th style={{ textAlign: 'right' }}>Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" className="text-center py-8 text-muted">No logs found matching filters.</td>
-                    </tr>
-                  ) : (
-                    logs.map((log) => (
-                      <motion.tr 
-                        key={log._id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <td>
-                          <div className="log-user-info">
-                            <span className="log-username font-semibold">{log.username}</span>
-                            <span className={`log-role capitalize ${log.role === 'admin' ? 'log-role-admin' : ''}`}>{log.role || 'System'}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`log-badge ${getBadgeClass(log.action)}`}>
-                            {log.action}
-                          </span>
-                        </td>
-                        <td className="log-details">{log.details}</td>
-                        <td className="log-metadata">
-                          {renderMetadata(log)}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          {formatDate(log.timestamp)}
-                        </td>
-                      </motion.tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              <div className="activity-list">
+                <div className="activity-stream-heading"><span>WORKSPACE HISTORY</span><span>{totalItems} events</span></div>
+                {logs.length === 0 ? <div className="activity-empty"><span>↗</span><h3>No activity to show</h3><p>Try a different filter or check back after your next operation.</p></div> : logs.map((log,index) => (
+                  <article className="activity-event" key={log._id || log.id || index}>
+                    <div className={'activity-event-icon '+getBadgeClass(log.action)} aria-hidden="true">{log.action === 'Error' ? '!' : log.action?.toLowerCase().includes('login') ? '↗' : '✓'}</div>
+                    <div className="activity-event-body">
+                      <div className="activity-event-heading"><span className={'log-badge '+getBadgeClass(log.action)}>{log.action}</span><span className="activity-actor">{log.username || 'System'}<small>{log.role || 'System'}</small></span></div>
+                      <p>{log.details}</p>
+                      {log.metadata && Object.keys(log.metadata).length > 0 && <details className="activity-details"><summary>View details</summary><div>{renderMetadata(log)}</div></details>}
+                    </div>
+                    <div className="activity-event-time">{formatDate(log.timestamp)}</div>
+                  </article>
+                ))}
+              </div>
             )}
           </div>
 
@@ -290,6 +219,7 @@ export default function UserLogs() {
             <div className="pagination-group">
               <button 
                 className="pagination-btn icon-btn"
+                aria-label="Previous page"
                 disabled={page === 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
               >
@@ -304,6 +234,7 @@ export default function UserLogs() {
               
               <button 
                 className="pagination-btn icon-btn"
+                aria-label="Next page"
                 disabled={page === totalPages || totalPages === 0}
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               >

@@ -1,17 +1,26 @@
-import React, { useState } from 'react';
+import { batchMasterFiles } from '../features/batches/masterTable.js';
+import QuickLogins from './QuickLogins';
+import BatchesModal from './BatchesModal';
+import { readTokenFile, buildRosterArchive, buildLoginArchive } from '../features/documents/generate.js';
+import { createDownloadTarget } from '../utils/download.js';
+import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth.js';
 import Loader from './Loader';
-
-const { ipcRenderer } = window.require('electron');
+import api from '../api';
+import { generateLoginPdfHtml } from '../features/documents/templates.js';
 
 function CeptCreate() {
   const { user } = useAuth();
+  const [loginMode, setLoginMode] = useState('tables');
+  const [showBatches, setShowBatches] = useState(false);
+  const [selectingBatch, setSelectingBatch] = useState(false);
+  const [selectedBatch, setSelectedBatch] = useState(null);
   
   // Left Column State (Create Table - Wizard)
-  const [wizardStep, setWizardStep] = useState(1); // 1: upload data, 2: map files, 3: upload tokens
-  const [mappedFiles, setMappedFiles] = useState([]); // [{ filePath, fileName, count, locationName }]
-  const [tokenFilePath, setTokenFilePath] = useState(null);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [mappedFiles, setMappedFiles] = useState([]); // [{ file, fileName, count, locationName, data }]
+  const [tokenFileData, setTokenFileData] = useState(null); // { file, fileName, data }
   const [openDropdownIdx, setOpenDropdownIdx] = useState(null);
   const [customLocationIdx, setCustomLocationIdx] = useState(null);
   const predefinedLocations = ['CS_lab 404', 'Maritime_lab 232'];
@@ -22,54 +31,48 @@ function CeptCreate() {
   const [tableError, setTableError] = useState('');
 
   // Right Column State (Generate PDF)
-  const [ceptTablePaths, setCeptTablePaths] = useState([]);
-  
+  const [ceptTableFiles, setCeptTableFiles] = useState([]);
   const [isProcessingPdf, setIsProcessingPdf] = useState(false);
   const [isSuccessPdf, setIsSuccessPdf] = useState(false);
   const [pdfError, setPdfError] = useState('');
-  const [successPdfPath, setSuccessPdfPath] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
 
-  // --- Handlers for Left Column ---
-  const handleFileSelectData = async () => {
-    try {
-      const response = await ipcRenderer.invoke('select-file', {
-        title: 'Select Student Data Files',
-        properties: ['openFile', 'multiSelections'],
-        filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }]
-      });
-      if (response.success && response.filePaths && response.filePaths.length > 0) {
-        setIsProcessingTable(true);
-        const analysis = await ipcRenderer.invoke('analyze-student-files', { filePaths: response.filePaths });
-        setIsProcessingTable(false);
-        if (analysis.success) {
-          const sortedFiles = analysis.files.sort((a, b) => a.count - b.count);
-          setMappedFiles(sortedFiles);
-          setWizardStep(2); // Move to mapping step
-        } else {
-          setTableError(analysis.message);
-        }
-      }
-    } catch (err) {
-      setIsProcessingTable(false);
-      setTableError(err.message);
-    }
+  // Hidden inputs refs
+  const tokensInputRef = useRef(null);
+  const pdfTableInputRef = useRef(null);
+
+
+  const handlePreviewLayout = () => {
+    // Generate sample preview in frontend
+    const sampleStudent = [{
+        Username: '123456789',
+        Password: 'passwordABC',
+        Name: 'John Doe',
+        Time: '10:00 AM',
+        Location: 'CS_lab 404'
+    }];
+    setPreviewHtml(generateLoginPdfHtml(sampleStudent));
+    setShowPreview(prev => !prev);
   };
 
-  const handleFileSelectTokens = async () => {
+  // --- Handlers for Left Column ---
+  const chooseBatch = batch => {
     try {
-      const response = await ipcRenderer.invoke('select-file', {
-        title: 'Select Login Tokens',
-        properties: ['openFile'],
-        filters: [{ name: 'CSV Files', extensions: ['csv'] }]
-      });
-      if (response.success && response.filePaths && response.filePaths.length > 0) {
-        setTokenFilePath(response.filePaths[0]);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      const files = batchMasterFiles(batch);
+      setMappedFiles(files); setSelectedBatch({ id: batch.id, name: batch.name });
+      setTokenFileData(null); setOpenDropdownIdx(null); setCustomLocationIdx(null);
+      setTableError(''); setUnmatchedAlert(null); setIsSuccessTable(false);
+      setWizardStep(2); setSelectingBatch(false);
+    } catch (error) { setTableError(error.message); setSelectingBatch(false); }
+  };
+
+  const handleFileSelectTokens = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try { setTokenFileData(await readTokenFile(file)); setTableError(''); }
+    catch (error) { setTokenFileData(null); setTableError(error.message); }
   };
 
   const handleCreateTable = async () => {
@@ -81,7 +84,7 @@ function CeptCreate() {
       setTableError('Please select a location for all files before exporting.');
       return;
     }
-    if (!tokenFilePath) {
+    if (!tokenFileData) {
       setTableError('Please upload the Login Tokens file (.csv).');
       return;
     }
@@ -89,34 +92,42 @@ function CeptCreate() {
     setIsProcessingTable(true);
 
     try {
-      const response = await ipcRenderer.invoke('generate-cept-table', {
+      const fileHandle = await createDownloadTarget({ suggestedName: 'CEPT_Tables.zip', types: [{ description: 'ZIP Archive', accept: { 'application/zip': ['.zip'] } }] });
+      const { blob: zipBlob, unmatched, totalProcessed, locationsCount } = await buildRosterArchive(mappedFiles, tokenFileData.data);
+      const writable = await fileHandle.createWritable();
+      await writable.write(zipBlob);
+      await writable.close();
+
+      // Log success remotely
+      await api.post('/log-cept-table', {
         username: user.username,
-        mappedFiles,
-        tokenFilePath
+        locationsCount,
+        totalProcessed,
+        unmatchedCount: unmatched.length,
+        unmatchedRegNums: unmatched
       });
 
-      if (response.success) {
-        if (response.unmatched && response.unmatched.length > 0) {
-          setUnmatchedAlert(`Table Created! However, ${response.unmatched.length} students had no matching token in the CSV. Their passwords were left blank.`);
-        } else {
-          setIsSuccessTable(true);
-        }
+      if (unmatched.length > 0) {
+        const missingList = unmatched.length > 10 ? unmatched.slice(0, 10).join(', ') + `... (and ${unmatched.length - 10} more)` : unmatched.join(', ');
+        setUnmatchedAlert(`Table Created! However, ${unmatched.length} student(s) had no matching token. Passwords were left blank for: ${missingList}`);
       } else {
-        if (response.message !== 'Export canceled by user.') {
-          setTableError(`Error: ${response.message}`);
-        }
+        setIsSuccessTable(true);
       }
+
     } catch (error) {
-      setTableError(`System Error: ${error.message}`);
+      if (error.name !== 'AbortError') {
+        setTableError(`System Error: ${error.message}`);
+      }
     } finally {
       setIsProcessingTable(false);
     }
   };
 
   const resetTableFlow = () => {
+    setSelectedBatch(null);
     setWizardStep(1);
     setMappedFiles([]);
-    setTokenFilePath(null);
+    setTokenFileData(null);
     setOpenDropdownIdx(null);
     setCustomLocationIdx(null);
     setIsSuccessTable(false);
@@ -125,78 +136,68 @@ function CeptCreate() {
   };
 
   // --- Handlers for Right Column ---
-  const handleFileSelectPdf = async () => {
-    try {
-      const response = await ipcRenderer.invoke('select-file', {
-        title: 'Select Generated CEPT Table(s)',
-        properties: ['openFile', 'multiSelections'],
-        filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }]
-      });
-      if (response.success && response.filePaths && response.filePaths.length > 0) {
-        setCeptTablePaths(response.filePaths);
-      }
-    } catch (err) {
-      console.error(err);
+  const handleFileSelectPdf = (e) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      setCeptTableFiles(Array.from(files));
     }
   };
 
   const handleGeneratePdf = async () => {
     setPdfError('');
-
-    if (!ceptTablePaths || ceptTablePaths.length === 0) {
+    if (ceptTableFiles.length === 0) {
       setPdfError('Please upload at least one CEPT Table Excel file first.');
       return;
     }
 
-    setIsProcessingPdf(true);
-
     try {
-      const response = await ipcRenderer.invoke('generate-documents', {
-        username: user.username,
-        ceptTablePaths
+      const fileHandle = await createDownloadTarget({
+        suggestedName: 'Login_PDFs.zip',
+        types: [{ description: 'ZIP Archive', accept: { 'application/zip': ['.zip'] } }]
       });
 
-      if (response.success) {
-        setSuccessPdfPath(response.pdfPath);
-        setIsSuccessPdf(true);
-      } else {
-        if (response.message !== 'Export canceled by user.') {
-          setPdfError(`Error: ${response.message}`);
-        }
-      }
+      setIsProcessingPdf(true);
+
+      const { blob: zipBlob, successCount, totalStudents } = await buildLoginArchive(ceptTableFiles);
+      const writable = await fileHandle.createWritable();
+      await writable.write(zipBlob);
+      await writable.close();
+
+      await api.post('/log-login-pdfs', {
+        username: user.username,
+        successCount,
+        totalStudents
+      });
+
+      setIsSuccessPdf(true);
+
     } catch (error) {
-      setPdfError(`System Error: ${error.message}`);
+      if (error.name !== 'AbortError') {
+        setPdfError(`System Error: ${error.message}`);
+      }
     } finally {
       setIsProcessingPdf(false);
     }
   };
 
   const resetPdfFlow = () => {
-    setCeptTablePaths([]);
+    setCeptTableFiles([]);
     setIsSuccessPdf(false);
-    setSuccessPdfPath('');
   };
 
-  const handlePreviewLayout = async () => {
-    try {
-      const res = await ipcRenderer.invoke('preview-pdf-layout');
-      if (res.success) {
-        setPreviewHtml(res.html);
-        setShowPreview(prev => !prev); // Toggle the view below the cards
-      } else {
-        setPdfError('Failed to load preview layout.');
-      }
-    } catch (e) {
-      setPdfError('System Error: ' + e.message);
-    }
-  };
 
   return (
     <div className="cept-create-container">
-      <div className="page-hero">
+      <input type="file" accept=".csv" aria-label="Upload login tokens" ref={tokensInputRef} style={{ display: 'none' }} onChange={handleFileSelectTokens} />
+      <input type="file" multiple accept=".xlsx, .xls" ref={pdfTableInputRef} style={{ display: 'none' }} onChange={handleFileSelectPdf} />
+      <div  style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}></div>
+      {selectingBatch && <BatchesModal onClose={() => setSelectingBatch(false)} onChoose={chooseBatch} />}
+      {showBatches && <BatchesModal onClose={() => setShowBatches(false)} />}
+      <div className="page-hero batch-page-heading">
         <h1 className="page-hero-title">
           CEPT <span className="gradient-text">Create</span>
         </h1>
+        <button className="gradient-btn secondary" onClick={() => setShowBatches(true)}>Batches</button>
       </div>
 
       <div className="cept-split-layout">
@@ -204,7 +205,7 @@ function CeptCreate() {
         {/* ================= LEFT COLUMN: TABLE GENERATOR ================= */}
         <div className="cept-split-card-left">
           <div className="cept-split-card-header">
-            <h3>Step 1: Generate Master Table</h3>
+            <h3>Build your master table</h3>
           </div>
           
           <div className="cept-split-card-body">
@@ -226,14 +227,14 @@ function CeptCreate() {
                     </svg>
                   </div>
                   <h3 className="cept-success-title gradient-text">Table Generated</h3>
-                  <p className="cept-success-desc">The CEPT tables have been flawlessly styled and saved.</p>
+                  <p className="cept-success-desc">Your CEPT tables have been generated and saved.</p>
                   <button className="gradient-btn" onClick={resetTableFlow}>GENERATE ANOTHER</button>
                 </motion.div>
               ) : unmatchedAlert ? (
-                <motion.div key="alert" className="flex flex-col items-center justify-center cept-split-view-state"
-                  initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-                  <div className="cept-warning-icon">⚠️</div>
-                  <h3 className="cept-warning-title">Attention Needed</h3>
+                  <motion.div key="alert" className="flex flex-col items-center justify-center cept-split-view-state"
+                    initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+                    <div className="cept-warning-icon">⚠️</div>
+                    <h3 className="cept-warning-title">Attention Needed</h3>
                   <p className="cept-warning-desc">{unmatchedAlert}</p>
                   <button className="gradient-btn primary" onClick={resetTableFlow}>ACKNOWLEDGE & CONTINUE</button>
                 </motion.div>
@@ -243,12 +244,12 @@ function CeptCreate() {
                     <div className="cept-upload-container" style={{ gridTemplateColumns: '1fr' }}>
                       <div className="cept-upload-card">
                         <h4 className="cept-upload-title">Student Data</h4>
-                        <p className="cept-upload-desc">Select 1 or more Excel files to begin.</p>
+                        <p className="cept-upload-desc">Choose a saved batch, assign locations, then add your login tokens.</p>
                         <button 
                           className="gradient-btn secondary w-full"
-                          onClick={handleFileSelectData}
+                          onClick={() => setSelectingBatch(true)}
                         >
-                          UPLOAD .XLSX FILES
+                          Build master data table
                         </button>
                       </div>
                     </div>
@@ -263,7 +264,8 @@ function CeptCreate() {
                         exit={{ opacity: 0, y: -15 }}
                         transition={{ duration: 0.3, ease: "easeOut" }}
                       >
-                        <h4 className="cept-mapping-title">Map File Locations</h4>
+                        <div className="cept-selected-batch"><div><span>Selected batch</span><strong>{selectedBatch?.name}</strong></div><button className="batch-back" onClick={() => setSelectingBatch(true)}>Change batch</button></div>
+                        <h4 className="cept-mapping-title">Choose a location for each file</h4>
                       <div className="cept-file-mapping-list">
                         {mappedFiles.map((file, idx) => (
                           <motion.div 
@@ -287,7 +289,8 @@ function CeptCreate() {
                                 <div className="flex w-full gap-2">
                                   <input 
                                     type="text" 
-                                    className="modern-input w-full" 
+                                    className="modern-input w-full"
+                                    aria-label={`Custom location for ${file.fileName}`}
                                     placeholder="Custom location..." 
                                     value={file.locationName}
                                     onChange={(e) => {
@@ -311,15 +314,15 @@ function CeptCreate() {
                                 </div>
                               ) : (
                                 <div className="cept-custom-dropdown-wrapper">
-                                  <div 
+                                  <button type="button" aria-label={`Location for ${file.fileName}`} aria-expanded={openDropdownIdx === idx}
                                     className={`modern-input cept-dropdown-trigger ${openDropdownIdx === idx ? 'open' : ''}`}
                                     onClick={() => setOpenDropdownIdx(openDropdownIdx === idx ? null : idx)}
                                   >
                                     <span className={file.locationName ? "text-primary truncate" : "text-muted truncate"}>
                                       {file.locationName || "Select location..."}
                                     </span>
-                                    <span className="dropdown-arrow text-muted">▼</span>
-                                  </div>
+                                    <span className="dropdown-arrow text-muted">▾</span>
+                                  </button>
                                   
                                   <AnimatePresence>
                                     {openDropdownIdx === idx && (
@@ -368,7 +371,7 @@ function CeptCreate() {
                       </div>
 
                       <AnimatePresence>
-                        {mappedFiles.every(f => f.locationName.trim() !== '') && (
+                        {mappedFiles.length > 0 && mappedFiles.every(f => f.locationName.trim() !== '') && (
                           <motion.div
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
@@ -379,10 +382,10 @@ function CeptCreate() {
                               <h4 className="cept-upload-title">Login Tokens</h4>
                               <p className="cept-upload-desc">CSV file with Logins</p>
                               <button 
-                                className={`gradient-btn ${tokenFilePath ? 'success' : 'secondary'} w-full`}
-                                onClick={handleFileSelectTokens}
+                                className={`gradient-btn ${tokenFileData ? 'success' : 'secondary'} w-full`}
+                                onClick={() => tokensInputRef.current.click()}
                               >
-                                {tokenFilePath ? 'SELECTED ✓' : 'UPLOAD .CSV'}
+                                {tokenFileData ? `✓ ${tokenFileData.fileName}` : 'Upload tokens file (.csv)'}
                               </button>
                             </div>
                           </motion.div>
@@ -394,7 +397,7 @@ function CeptCreate() {
 
                   {tableError && <p className="text-accent cept-modal-error-msg">{tableError}</p>}
 
-                  {wizardStep >= 2 && tokenFilePath && mappedFiles.every(f => f.locationName.trim() !== '') && (
+                  {wizardStep >= 2 && tokenFileData && mappedFiles.length > 0 && mappedFiles.every(f => f.locationName.trim() !== '') && (
                     <div className="flex justify-end cept-form-actions mt-6">
                       <motion.button 
                         whileHover={{ scale: 1.02 }}
@@ -415,10 +418,13 @@ function CeptCreate() {
         {/* ================= RIGHT COLUMN: PDF GENERATOR ================= */}
         <div className="cept-split-card-right">
           <div className="cept-split-card-header">
-            <h3>Step 2: Generate PDF Logins</h3>
+            <h3>Create candidate logins</h3>
           </div>
           
           <div className="cept-split-card-body">
+            <div className="quick-login-modes" aria-label="Login creation method"><button type="button" aria-pressed={loginMode === 'tables'} disabled={isProcessingPdf} onClick={() => setLoginMode('tables')}>From master tables</button><button type="button" aria-pressed={loginMode === 'quick'} disabled={isProcessingPdf} onClick={() => setLoginMode('quick')}>Quick logins</button></div>
+            {loginMode === 'quick' ? <QuickLogins /> : <>
+
             <AnimatePresence mode="wait">
               {isProcessingPdf ? (
                 <motion.div key="loader" className="flex flex-col items-center justify-center cept-split-view-state">
@@ -440,7 +446,7 @@ function CeptCreate() {
                   <h3 className="cept-success-title gradient-text">PDF Generated</h3>
                   <p className="cept-success-desc">
                     The Candidate Login Information PDF has been rendered successfully.<br/><br/>
-                    <span className="font-mono text-xs opacity-75">{successPdfPath}</span>
+                    <span className="font-mono text-xs opacity-75">Downloaded to your computer</span>
                   </p>
                   <button className="gradient-btn" onClick={resetPdfFlow}>GENERATE ANOTHER</button>
                 </motion.div>
@@ -448,7 +454,7 @@ function CeptCreate() {
                 <motion.div key="form" className="flex flex-col w-full cept-form-container h-full">
                   <div className="cept-pdf-info-text text-center">
                     <p className="text-sm opacity-80" style={{color: 'var(--text-muted)'}}>
-                      Upload the generated CEPT Table to automatically extract every student and compile a massive, perfectly styled PDF containing their individual Login Information pages.
+                      Upload your CEPT tables to create a PDF with individual candidate login slips.
                     </p>
                   </div>
 
@@ -457,10 +463,10 @@ function CeptCreate() {
                       <h4 className="cept-upload-title">CEPT Excel Table(s)</h4>
                       <p className="cept-upload-desc">Select the final styled Excel file(s)</p>
                       <button 
-                        className={`gradient-btn ${ceptTablePaths.length > 0 ? 'success' : 'secondary'} w-full`}
-                        onClick={handleFileSelectPdf}
+                        className={`gradient-btn ${ceptTableFiles.length > 0 ? 'success' : 'secondary'} w-full`}
+                        onClick={() => pdfTableInputRef.current.click()}
                       >
-                        {ceptTablePaths.length > 0 ? `${ceptTablePaths.length} FILE(S) SELECTED ✓` : 'UPLOAD TABLE(S)'}
+                        {ceptTableFiles.length > 0 ? `${ceptTableFiles.length} FILE(S) SELECTED Γ£ô` : 'UPLOAD TABLE(S)'}
                       </button>
                     </div>
                   </div>
@@ -489,6 +495,7 @@ function CeptCreate() {
                 </motion.div>
               )}
             </AnimatePresence>
+            </>}
           </div>
         </div>
         

@@ -1,107 +1,13 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { useAuth } from '../context/AuthContext';
-import Loader from './Loader';
-import VersionBadge from './VersionBadge';
-
-export default function LoginPage({ versionInfo, openUpdateModal }) {
-  const { login } = useAuth();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    try {
-      const response = await window.require('electron').ipcRenderer.invoke('auth-login', { username, password });
-      
-      if (response.success) {
-        login(response.user);
-      } else {
-        setError(response.message || 'Login failed.');
-      }
-    } catch (err) {
-      console.error(err);
-      setError('An internal error occurred. Ensure your database is connected.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="steam-layout-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
-      <motion.div 
-        className="glass-card login-card"
-        initial={{ y: 50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-      >
-        <div className="login-header">
-          <h1 className="login-title">
-            IEC A<span>A</span>ST
-          </h1>
-          <p className="login-subtitle text-muted">
-            helper
-          </p>
-        </div>
-
-        {error && (
-          <motion.div 
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            className="login-error-message"
-          >
-            {error}
-          </motion.div>
-        )}
-
-        <form onSubmit={handleSubmit} className="login-form">
-          
-          <div className="modern-input-container">
-            <label className="modern-label">Username</label>
-            <input 
-              type="text" 
-              className="modern-input" 
-              placeholder="e.g. admin" 
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </div>
-          
-          <div className="modern-input-container login-input-group-last">
-            <label className="modern-label">Password</label>
-            <input 
-              type="password" 
-              className="modern-input" 
-              placeholder="••••••••" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-
-          {isLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', padding: '0.5rem' }}>
-              <Loader inline size="3em" />
-            </div>
-          ) : (
-            <button 
-              type="submit" 
-              className="gradient-btn" 
-              style={{ width: '100%', marginTop: '1rem' }}
-            >
-              LOGIN TO PORTAL
-            </button>
-          )}
-          
-        </form>
-      </motion.div>
-      <VersionBadge versionInfo={versionInfo} openUpdateModal={openUpdateModal} className="fixed-bottom-right" />
-    </div>
-  );
+import { motion, useReducedMotion } from 'framer-motion';
+import { useAuth } from '../context/useAuth.js';
+import { Brand, Icon } from './WorkspaceUI';
+import ThemeToggle from './ThemeToggle';
+import api from '../api';
+export default function LoginPage() {
+ const { login } = useAuth(); const reduced = useReducedMotion();
+ const [username,setUsername] = useState(''); const [password,setPassword] = useState('');
+ const [showPassword,setShowPassword] = useState(false); const [error,setError] = useState(''); const [busy,setBusy] = useState(false);
+ async function submit(e) { e.preventDefault(); setError(''); setBusy(true); try { const {data} = await api.post('/auth-login',{username,password}); if(data.success) login(data.user); else setError(data.message || 'Unable to sign in. Please try again.'); } catch(e) { setError(e.response?.data?.message || 'Unable to connect. Please try again.'); } finally {setBusy(false);} }
+ return <div className="workspace-login"><header><Brand/><ThemeToggle/></header><div className="login-grid"><motion.section className="login-form-panel" initial={{opacity:0,y:reduced?0:12}} animate={{opacity:1,y:0}} transition={{duration:reduced?0:.4}}><span className="eyebrow">YOUR CEPT WORKSPACE</span><h1>Welcome<br/>back<span>.</span></h1><p>Sign in to pick up where you left off.</p><form onSubmit={submit}><label htmlFor="username">Username</label><input id="username" autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} required placeholder="Your username"/><label htmlFor="password">Password</label><div className="login-password"><input id="password" type={showPassword?'text':'password'} autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="Your password"/><button type="button" onClick={()=>setShowPassword(!showPassword)} aria-label={showPassword?'Hide password':'Show password'}>{showPassword?'Hide':'Show'}</button></div>{error && <p className="login-error-message" role="alert">{error}</p>}<button className="gradient-btn" disabled={busy}>{busy?'Signing in…':'Sign in'}<Icon name="arrow"/></button></form><small>Using AAST Connect? Open CEPT Helper from your portal.</small></motion.section><section className="login-art" aria-label="CEPT Helper"><div className="art-topline"><span>AAST · IEC</span><span>CEPT HELPER</span></div><h2>Less admin.<br/><em>More momentum.</em></h2><div className="document-art" aria-hidden="true"><div className="art-orbit"/><div className="art-sheet back"/><div className="art-sheet front"><span className="art-document-icon"><Icon name="document"/></span><b>Ready for what's next.</b><span className="art-line"/><span className="art-line short"/><div className="art-table">{Array.from({length:12},(_,i)=><i key={i}/>)}</div><span className="art-check">✓</span></div><div className="art-label"><Icon name="calendar"/>Data → Documents</div></div><p>One place for your CEPT day.</p></section></div><footer>International Examinations Center</footer></div>;
 }

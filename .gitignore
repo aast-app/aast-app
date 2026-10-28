@@ -24,3 +24,26 @@ release
 *.njsproj
 *.sln
 *.sw?
+
+# Local configuration, runtime data and generated test output
+.env
+.env.*
+!.env.example
+**/backups/
+server/test/.cept-browser-*/
+lint-results.json
+
+# Private local data and historical code are never deployment inputs.
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+archive/
+.vercel/
+server/.agents/
+server/.claude/
+server/.windsurf/
+server/skills-lock.json
+server/src/generated/
+
+.deployment/

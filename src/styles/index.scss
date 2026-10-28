@@ -1,4 +1,3 @@
-@use "tailwindcss";
 @use 'variables';
 @use 'base';
 @use 'components';
@@ -12,4 +11,8 @@
 @use 'CustomSelect';
 @use 'CeptCreate';  
 @use 'App';
-@use 'VersionBadge';
+@use 'VersionBadge';@use 'Workspace';
+
+@use 'Batches';
+
+@use 'ReviewModal';
